@@ -1189,6 +1189,69 @@ export const Settings = ({ data, setData }) => {
                         </button>
                     </div>
                 </div>
+
+                <!-- Google Sheet Sync Configuration -->
+                <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                    <div class="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
+                        <h3 class="text-white font-black text-lg">📊 Teacher Data Sync</h3>
+                        <p class="text-blue-100 text-xs font-medium">Test connection & sync status</p>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <div class="space-y-1">
+                            <label class="text-xs font-bold text-slate-500 uppercase">Deployed Script URL</label>
+                            <input 
+                                class="w-full p-3 bg-slate-50 rounded-xl outline-none border border-slate-100 focus:border-blue-400"
+                                value=${settings.googleScriptUrl || ''}
+                                onInput=${(e) => setData({...data, settings: {...settings, googleScriptUrl: e.target.value}})}
+                                placeholder="https://script.google.com/macros/s/..."
+                            />
+                            <p class="text-[10px] text-slate-400">Current: ${settings.googleScriptUrl ? '✅ Configured' : '❌ Not set'}</p>
+                        </div>
+                        <button 
+                            onClick=${async () => {
+                                if (!settings.googleScriptUrl) {
+                                    alert('Please enter the Script URL first');
+                                    return;
+                                }
+                                try {
+                                    const url = new URL(settings.googleScriptUrl);
+                                    url.searchParams.set('action', 'ping');
+                                    const response = await fetch(url.toString());
+                                    const result = await response.json();
+                                    if (result.success) {
+                                        alert('✅ Connection Successful!\n\n' + result.message + '\n\nThe script is working. Check browser console (F12) for sync details.');
+                                    } else {
+                                        alert('❌ Connection Failed: ' + result.error);
+                                    }
+                                } catch (e) {
+                                    alert('❌ Error: ' + e.message);
+                                }
+                            }}
+                            class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold"
+                        >
+                            🔗 Test Google Connection
+                        </button>
+                        <div class="bg-green-50 p-4 rounded-xl border border-green-200">
+                            <p class="text-xs font-bold text-green-800 mb-2">👨‍🏫 How Teachers Use This:</p>
+                            <p class="text-[10px] text-green-700">1. Teachers open the Google Sheet on their phone</p>
+                            <p class="text-[10px] text-green-700">2. They add/edit scores in the Assessments tab</p>
+                            <p class="text-[10px] text-green-700">3. Admin clicks "Sync" button here to get all data</p>
+                            <p class="text-[10px] text-green-700 mt-2">✅ Each teacher can work on different grades without interference</p>
+                        </div>
+                        <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                            <p class="text-xs font-bold text-blue-800 mb-2">📋 Sheet Columns (Auto-created)</p>
+                            <p class="text-[10px] text-blue-600"><b>Students:</b> id, name, grade, stream, admissionNo, parentContact</p>
+                            <p class="text-[10px] text-blue-600"><b>Assessments:</b> id, studentId, subject, score, term, examType, academicYear, date, level</p>
+                            <p class="text-[10px] text-blue-600"><b>Attendance:</b> id, studentId, date, status, term, academicYear</p>
+                        </div>
+                        <button 
+                            onClick=${handleUpdateProfile}
+                            class=${`w-full py-3 rounded-xl font-bold transition-all shadow-lg ${updating ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white'}`}
+                        >
+                            ${updating ? '✓ Saved' : 'Save Google Sync Settings'}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="p-6 bg-red-50 rounded-2xl border border-red-100">

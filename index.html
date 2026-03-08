@@ -1,9 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>EduTrack CBC Pro</title>
+    <script>
+        const originalWarn = console.warn;
+        console.warn = function (...args) {
+            if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) return;
+            originalWarn.apply(console, args);
+        };
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
         {
@@ -17,54 +25,219 @@
         }
     </script>
     <style>
-        :root { --primary: #2563eb; --secondary: #64748b; }
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
-        .no-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
-        .no-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .no-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
-        .no-scrollbar { -ms-overflow-style: auto; scrollbar-width: thin; }
-        @media print {
-            .no-print { display: none !important; }
-            .print-only { display: block !important; }
-            body, html { height: auto !important; overflow: visible !important; background-color: white !important; color: black !important; }
-            main { overflow: visible !important; position: static !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
-            #app { height: auto !important; overflow: visible !important; }
-            .h-screen { height: auto !important; }
-            .card-shadow { box-shadow: none !important; border: 1px solid #000 !important; }
-            .page-break { page-break-before: always; }
-            .report-page-break { page-break-before: always; border-top: 1px solid #000; padding-top: 2rem; margin-top: 2rem; }
-            .overflow-x-auto { overflow-x: visible !important; }
-            .no-scrollbar { overflow: visible !important; -ms-overflow-style: auto !important; scrollbar-width: auto !important; }
-            .sticky { position: static !important; }
-            table { min-width: auto !important; width: 100% !important; }
-            th, td { white-space: normal !important; }
-            /* Analysis table specific fixes */
-            .analysis-table { min-width: auto !important; font-size: 8px !important; }
-            .analysis-table th, .analysis-table td { padding: 4px !important; }
-            @media print {
-                .report-page-break { border-top: none; padding-top: 0; margin-top: 0; }
-                .a4-page { width: 210mm; height: 297mm; padding: 10mm; margin: 0 auto; box-sizing: border-box; position: relative; }
-                .a4-container { width: 100%; height: 100%; display: flex; flex-direction: column; }
-                /* Keep printed text legible while allowing color printing where supported */
-                * { color: black !important; border-color: #333 !important; }
-                .text-slate-400, .text-slate-500, .text-slate-300 { color: #000 !important; }
-                .bg-slate-50, .bg-slate-100 { background-color: transparent !important; }
-            /* Keep background colors for marklist graphs */
-            .marklist-graph { background-color: #f8fafc !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .marklist-bar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                /* Allow images to print in color when the printer supports it and center print-only logos */
-                img { filter: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .print-only img { display: block; margin: 0 auto; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            }
-            .max-w-6xl { max-width: 100% !important; }
-            .timetable-grid { display: grid; grid-template-columns: 80px repeat(5, 1fr); }
-            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        :root {
+            --primary: #2563eb;
+            --secondary: #64748b;
         }
-        .print-only { display: none; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            height: 4px;
+            width: 4px;
+        }
+
+        .no-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .no-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: auto;
+            scrollbar-width: thin;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+
+            .print-only {
+                display: block !important;
+            }
+
+            body,
+            html {
+                height: auto !important;
+                overflow: visible !important;
+                background-color: white !important;
+                color: black !important;
+            }
+
+            main {
+                overflow: visible !important;
+                position: static !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            #app {
+                height: auto !important;
+                overflow: visible !important;
+            }
+
+            .h-screen {
+                height: auto !important;
+            }
+
+            .card-shadow {
+                box-shadow: none !important;
+                border: 1px solid #000 !important;
+            }
+
+            .page-break {
+                page-break-before: always;
+            }
+
+            .report-page-break {
+                page-break-before: always;
+                border-top: 1px solid #000;
+                padding-top: 2rem;
+                margin-top: 2rem;
+            }
+
+            .overflow-x-auto {
+                overflow-x: visible !important;
+            }
+
+            .no-scrollbar {
+                overflow: visible !important;
+                -ms-overflow-style: auto !important;
+                scrollbar-width: auto !important;
+            }
+
+            .sticky {
+                position: static !important;
+            }
+
+            table {
+                min-width: auto !important;
+                width: 100% !important;
+            }
+
+            th,
+            td {
+                white-space: normal !important;
+            }
+
+            /* Analysis table specific fixes */
+            .analysis-table {
+                min-width: auto !important;
+                font-size: 8px !important;
+            }
+
+            .analysis-table th,
+            .analysis-table td {
+                padding: 4px !important;
+            }
+
+            @media print {
+                .report-page-break {
+                    border-top: none;
+                    padding-top: 0;
+                    margin-top: 0;
+                }
+
+                .a4-page {
+                    width: 210mm;
+                    height: 297mm;
+                    padding: 10mm;
+                    margin: 0 auto;
+                    box-sizing: border-box;
+                    position: relative;
+                }
+
+                .a4-container {
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                }
+
+                /* Keep printed text legible while allowing color printing where supported */
+                * {
+                    color: black !important;
+                    border-color: #333 !important;
+                }
+
+                .text-slate-400,
+                .text-slate-500,
+                .text-slate-300 {
+                    color: #000 !important;
+                }
+
+                .bg-slate-50,
+                .bg-slate-100 {
+                    background-color: transparent !important;
+                }
+
+                /* Keep background colors for marklist graphs */
+                .marklist-graph {
+                    background-color: #f8fafc !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+
+                .marklist-bar {
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+
+                /* Allow images to print in color when the printer supports it and center print-only logos */
+                img {
+                    filter: none !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+
+                .print-only img {
+                    display: block;
+                    margin: 0 auto;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+            }
+
+            .max-w-6xl {
+                max-width: 100% !important;
+            }
+
+            .timetable-grid {
+                display: grid;
+                grid-template-columns: 80px repeat(5, 1fr);
+            }
+
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            body.print-receipt-only .print-section-table {
+                display: none !important;
+            }
+
+            body.print-table-only .print-section-receipt {
+                display: none !important;
+            }
+        }
+
+        .print-only {
+            display: none;
+        }
     </style>
 </head>
+
 <body class="bg-gray-50 text-slate-900 h-screen overflow-hidden">
     <div id="app" class="h-full"></div>
     <script type="module" src="app.js"></script>
 </body>
+
 </html>

@@ -55,8 +55,8 @@ export const Dashboard = ({ data }) => {
                     </h3>
                     <div class="space-y-1">
                         ${payments.slice(-5).reverse().map((p, idx) => {
-                            const student = students.find(s => s.id === p.studentId);
-                            return html`
+        const student = students.find(s => s.id === p.studentId);
+        return html`
                                 <div class=${`flex justify-between items-center p-3 rounded-xl border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-slate-50/50' : ''}`}>
                                     <div>
                                         <p class="font-bold text-xs md:text-sm text-slate-700">${student?.name || 'Unknown Student'}</p>
@@ -68,7 +68,7 @@ export const Dashboard = ({ data }) => {
                                     </div>
                                 </div>
                             `;
-                        })}
+    })}
                         ${payments.length === 0 && html`<p class="text-center text-slate-300 py-4 text-sm">No recent payments recorded</p>`}
                     </div>
                 </div>
@@ -98,13 +98,13 @@ export const Dashboard = ({ data }) => {
                         <!-- Bars -->
                         <div class="absolute inset-0 flex items-end justify-between gap-1 px-1">
                             ${(settings.grades || []).map((grade, index) => {
-                                const count = students.filter(s => s.grade === grade).length;
-                                const maxCount = Math.max(...settings.grades.map(g => students.filter(s => s.grade === g).length), 1);
-                                const heightPct = (count / maxCount) * 100;
-                                const colors = ['bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-orange-400', 'bg-pink-400', 'bg-yellow-400', 'bg-cyan-400', 'bg-indigo-400'];
-                                const color = colors[index % colors.length];
-                                
-                                return html`
+        const count = students.filter(s => s.grade === grade).length;
+        const maxCount = Math.max(...settings.grades.map(g => students.filter(s => s.grade === g).length), 1);
+        const heightPct = (count / maxCount) * 100;
+        const colors = ['bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-orange-400', 'bg-pink-400', 'bg-yellow-400', 'bg-cyan-400', 'bg-indigo-400'];
+        const color = colors[index % colors.length];
+
+        return html`
                                     <div class="flex-1 flex flex-col items-center group relative h-full justify-end">
                                         <div class=${`w-full ${color} rounded-t-sm opacity-80 hover:opacity-100 transition-all cursor-pointer relative z-10`} style=${{ height: `${heightPct}%` }}>
                                             ${count > 0 && html`<span class="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-black text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity z-20">${count}</span>`}
@@ -113,7 +113,7 @@ export const Dashboard = ({ data }) => {
                                         <span class="absolute -bottom-10 text-[8px] font-bold text-slate-400 uppercase rotate-45 origin-left whitespace-nowrap">${grade}</span>
                                     </div>
                                 `;
-                            })}
+    })}
                         </div>
                     </div>
                     ${totalStudents === 0 && html`<p class="text-center text-slate-300 py-12 text-sm">No enrollment data</p>`}
@@ -144,11 +144,11 @@ export const Dashboard = ({ data }) => {
                         <!-- Bars -->
                         <div class="absolute inset-0 flex items-end justify-between gap-1 px-1">
                             ${feesPerGrade.map((item, index) => {
-                                const heightPct = (item.total / maxGradeFee) * 100;
-                                const colors = ['bg-emerald-400', 'bg-teal-400', 'bg-cyan-400', 'bg-sky-400', 'bg-blue-400', 'bg-indigo-400', 'bg-violet-400', 'bg-purple-400'];
-                                const color = colors[index % colors.length];
-                                
-                                return html`
+        const heightPct = (item.total / maxGradeFee) * 100;
+        const colors = ['bg-emerald-400', 'bg-teal-400', 'bg-cyan-400', 'bg-sky-400', 'bg-blue-400', 'bg-indigo-400', 'bg-violet-400', 'bg-purple-400'];
+        const color = colors[index % colors.length];
+
+        return html`
                                     <div class="flex-1 flex flex-col items-center group relative h-full justify-end">
                                         <div class=${`w-full ${color} rounded-t-sm opacity-80 hover:opacity-100 transition-all cursor-pointer relative z-10`} style=${{ height: `${heightPct}%` }}>
                                             <div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-30">
@@ -159,7 +159,7 @@ export const Dashboard = ({ data }) => {
                                         <span class="absolute -bottom-10 text-[8px] font-bold text-slate-400 uppercase rotate-45 origin-left whitespace-nowrap">${item.grade}</span>
                                     </div>
                                 `;
-                            })}
+    })}
                         </div>
                     </div>
                     ${totalFeesCollected === 0 && html`<p class="text-center text-slate-300 py-12 text-sm">No fee collection data yet</p>`}
@@ -178,16 +178,16 @@ const StatCard = ({ title, value, subtitle, icon, color }) => {
         cyan: { bg: 'bg-cyan-600', text: 'text-white', sub: 'text-cyan-100', iconBg: 'bg-cyan-500', stripe: 'rgba(255,255,255,0.05)' },
         red: { bg: 'bg-rose-600', text: 'text-white', sub: 'text-rose-100', iconBg: 'bg-rose-500', stripe: 'rgba(255,255,255,0.05)' }
     };
-    
+
     const theme = themes[color] || themes.blue;
-    
+
     return html`
         <div 
             class=${`${theme.bg} ${theme.text} p-5 md:p-6 rounded-3xl shadow-lg border-0 hover:scale-[1.02] transition-all relative overflow-hidden group h-full`}
             style=${{
-                backgroundImage: `linear-gradient(135deg, transparent 25%, ${theme.stripe} 25%, ${theme.stripe} 50%, transparent 50%, transparent 75%, ${theme.stripe} 75%, ${theme.stripe})`,
-                backgroundSize: '20px 20px'
-            }}
+            backgroundImage: `linear-gradient(135deg, transparent 25%, ${theme.stripe} 25%, ${theme.stripe} 50%, transparent 50%, transparent 75%, ${theme.stripe} 75%, ${theme.stripe})`,
+            backgroundSize: '20px 20px'
+        }}
         >
             <div class=${`w-12 h-12 rounded-2xl flex items-center justify-center text-xl mb-4 ${theme.iconBg} shadow-inner`}>
                 ${icon}

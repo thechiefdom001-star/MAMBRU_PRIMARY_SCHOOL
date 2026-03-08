@@ -11,6 +11,7 @@ export const Fees = ({ data, setData }) => {
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [filterGrade, setFilterGrade] = useState('ALL');
     const [filterStream, setFilterStream] = useState('ALL');
+    const [filterVoided, setFilterVoided] = useState('active');
     const [paymentItems, setPaymentItems] = useState({});
     const [receipt, setReceipt] = useState(null);
     const [showPromptModal, setShowPromptModal] = useState(false);
@@ -19,8 +20,8 @@ export const Fees = ({ data, setData }) => {
     const [promptPhone, setPromptPhone] = useState('');
     const [promptMethod, setPromptMethod] = useState('mpesa');
     const [promptStatus, setPromptStatus] = useState('');
-    
-    const streams = data?.settings?.streams || [];
+
+    const streams = (data && data.settings && data.settings.streams) || [];
 
     const defaultFeeColumns = [
         { key: 'previousArrears', label: 'Arrears B/F' },
@@ -46,7 +47,7 @@ export const Fees = ({ data, setData }) => {
         { key: 'academicSupport', label: 'Academic Support' },
         { key: 'pta', label: 'PTA' }
     ];
-    
+
     const customFeeColumns = (data.settings.customFeeColumns || []).map(cf => ({ key: cf.key, label: cf.label }));
     const feeColumns = [...defaultFeeColumns, ...customFeeColumns];
 
@@ -90,12 +91,12 @@ export const Fees = ({ data, setData }) => {
 
         const studentPayments = (data.payments || []).filter(p => p.studentId === selectedStudentId);
         const allPaymentsForStudent = [...studentPayments, newPayment];
-        
+
         setData({ ...data, payments: [...(data.payments || []), newPayment] });
-        setReceipt({ 
-            ...newPayment, 
-            studentName: student.name, 
-            grade: student.grade, 
+        setReceipt({
+            ...newPayment,
+            studentName: student.name,
+            grade: student.grade,
             balance: balanceAfter,
             structure: feeStructure,
             history: allPaymentsForStudent,
@@ -119,7 +120,7 @@ export const Fees = ({ data, setData }) => {
             alert('Please enter parent phone number');
             return;
         }
-        
+
         const phone = promptPhone.replace(/[^0-9]/g, '');
         if (phone.length < 10) {
             alert('Please enter a valid phone number');
@@ -176,16 +177,21 @@ export const Fees = ({ data, setData }) => {
     };
 
     const viewReceipt = (p) => {
+        if (p.voided) {
+            alert('This receipt has been VOIDED and cannot be viewed.');
+            return;
+        }
+
         const s = data.students.find(st => st.id === p.studentId);
         if (!s) return;
-        
+
         const financials = Storage.getStudentFinancials(s, data.payments, data.settings);
         const fs = data.settings.feeStructures.find(f => f.grade === s.grade);
-        
+
         const studentPayments = (data.payments || []).filter(pay => pay.studentId === s.id);
         const paymentIndex = studentPayments.findIndex(pay => pay.id === p.id);
         const historyUpToNow = studentPayments.slice(0, paymentIndex + 1);
-        
+
         // Use cumulative balance logic
         const paidUntilNow = historyUpToNow.reduce((sum, pay) => sum + pay.amount, 0);
         const currentBalance = financials.totalDue - paidUntilNow;
@@ -198,6 +204,54 @@ export const Fees = ({ data, setData }) => {
             structure: fs,
             history: historyUpToNow
         });
+    };
+
+    const handleVoidPayment = (paymentId) => {
+        const payment = data.payments.find(p => p.id === paymentId);
+        if (!payment) return;
+
+        const student = data.students.find(s => s.id === payment.studentId);
+        const confirmMsg = `VOID PAYMENT\n\nReceipt: ${payment.receiptNo}\nStudent: ${student && student.name || 'Unknown'}\nAmount: ${data.settings.currency} ${payment.amount.toLocaleString()}\nDate: ${payment.date}\n\nAre you sure you want to CANCEL this transaction?`;
+
+        if (!confirm(confirmMsg)) return;
+
+        // Mark payment as void instead of deleting
+        const updatedPayments = data.payments.map(p => {
+            if (p.id === paymentId) {
+                return { ...p, voided: true, voidedAt: new Date().toISOString(), voidedBy: 'Admin' };
+            }
+            return p;
+        });
+
+        setData({ ...data, payments: updatedPayments });
+        setReceipt(null);
+        alert('Payment has been VOIDED successfully!');
+    };
+
+    const handleRestorePayment = (paymentId) => {
+        if (!confirm('Restore this voided payment?')) return;
+
+        const updatedPayments = data.payments.map(p => {
+            if (p.id === paymentId) {
+                return { ...p, voided: false, voidedAt: null, voidedBy: null };
+            }
+            return p;
+        });
+
+        setData({ ...data, payments: updatedPayments });
+        alert('Payment restored successfully!');
+    };
+
+    const handlePrintReceipt = () => {
+        document.body.classList.add('print-receipt-only');
+        window.print();
+        setTimeout(() => document.body.classList.remove('print-receipt-only'), 500);
+    };
+
+    const handlePrintTable = () => {
+        document.body.classList.add('print-table-only');
+        window.print();
+        setTimeout(() => document.body.classList.remove('print-table-only'), 500);
     };
 
     return html`
@@ -213,8 +267,8 @@ export const Fees = ({ data, setData }) => {
                         
                         <div class="space-y-4">
                             <div class="bg-blue-50 p-4 rounded-xl">
-                                <p class="text-sm font-bold text-blue-800">${promptStudent?.name}</p>
-                                <p class="text-xs text-blue-600">${promptStudent?.grade} - Balance: ${data.settings.currency} ${promptAmount?.toLocaleString()}</p>
+                                <p class="text-sm font-bold text-blue-800">${promptStudent && promptStudent.name}</p>
+                                <p class="text-xs text-blue-600">${promptStudent && promptStudent.grade} - Balance: ${data.settings.currency} ${(promptAmount || 0).toLocaleString()}</p>
                             </div>
 
                             <div class="space-y-2">
@@ -252,7 +306,7 @@ export const Fees = ({ data, setData }) => {
                             <div class="space-y-2">
                                 <label class="text-xs font-bold text-slate-500 uppercase">Amount to Pay</label>
                                 <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                                    <span class="text-xl font-black text-green-600">${data.settings.currency} ${promptAmount?.toLocaleString()}</span>
+                                    <span class="text-xl font-black text-green-600">${data.settings.currency} ${(promptAmount || 0).toLocaleString()}</span>
                                 </div>
                             </div>
 
@@ -294,13 +348,13 @@ export const Fees = ({ data, setData }) => {
             <div class="flex justify-end no-print">
                 <button 
                     onClick=${() => {
-                        const student = data.students.find(s => s.id === selectedStudentId);
-                        if (student) {
-                            openPromptModal(student);
-                        } else {
-                            alert('Please select a student first');
-                        }
-                    }}
+            const student = data.students.find(s => s.id === selectedStudentId);
+            if (student) {
+                openPromptModal(student);
+            } else {
+                alert('Please select a student first');
+            }
+        }}
                     class="bg-green-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg shadow-green-200 flex items-center gap-2"
                 >
                     📱 Send Payment Prompt
@@ -344,12 +398,12 @@ export const Fees = ({ data, setData }) => {
                                 >
                                     <option value="">Select Student</option>
                                     ${(data.students || [])
-                                        .filter(s => {
-                                            if (filterGrade !== 'ALL' && s.grade !== filterGrade) return false;
-                                            if (filterStream !== 'ALL' && s.stream !== filterStream) return false;
-                                            return true;
-                                        })
-                                        .map(s => html`
+            .filter(s => {
+                if (filterGrade !== 'ALL' && s.grade !== filterGrade) return false;
+                if (filterStream !== 'ALL' && s.stream !== filterStream) return false;
+                return true;
+            })
+            .map(s => html`
                                             <option value=${s.id}>${s.name} (${s.grade}${s.stream || ''})</option>
                                         `)}
                                 </select>
@@ -371,18 +425,18 @@ export const Fees = ({ data, setData }) => {
                                 <label class="text-xs font-bold text-slate-500 uppercase block">Fee Breakdown (${data.settings.currency})</label>
                                 <div class="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-2 no-scrollbar">
                                     ${feeColumns.map(col => {
-                                        // Handle Arrears specially
-                                        if (col.key === 'previousArrears') {
-                                            const arrearsDue = Number(student.previousArrears) || 0;
-                                            // Calculate actual outstanding arrears (Arrears BF - what's already been paid towards it)
-                                            const paidArrears = (data.payments || [])
-                                                .filter(p => p.studentId === student.id)
-                                                .reduce((sum, p) => sum + (Number(p.items?.previousArrears) || 0), 0);
-                                            const outstandingArrears = Math.max(0, arrearsDue - paidArrears);
+                // Handle Arrears specially
+                if (col.key === 'previousArrears') {
+                    const arrearsDue = Number(student.previousArrears) || 0;
+                    // Calculate actual outstanding arrears (Arrears BF - what's already been paid towards it)
+                    const paidArrears = (data.payments || [])
+                        .filter(p => p.studentId === student.id)
+                        .reduce((sum, p) => sum + (Number(p.items && p.items.previousArrears) || 0), 0);
+                    const outstandingArrears = Math.max(0, arrearsDue - paidArrears);
 
-                                            if (outstandingArrears === 0 && arrearsDue === 0) return null;
-                                            
-                                            return html`
+                    if (outstandingArrears === 0 && arrearsDue === 0) return null;
+
+                    return html`
                                                 <div class="p-3 bg-orange-50 rounded-xl border-2 border-orange-200 col-span-2 animate-pulse-subtle">
                                                     <div class="flex justify-between items-center mb-1">
                                                         <p class="text-[10px] font-black text-orange-600 uppercase truncate">${col.label}</p>
@@ -405,21 +459,21 @@ export const Fees = ({ data, setData }) => {
                                                     <p class="text-[8px] text-orange-400 mt-1 italic">* It is recommended to clear arrears before current fees.</p>
                                                 </div>
                                             `;
-                                        }
+                }
 
-                                        // Term Filter logic: 
-                                        // 1. Hide other terms tuition
-                                        if (col.key === 't1' && selectedTerm !== 'T1') return null;
-                                        if (col.key === 't2' && selectedTerm !== 'T2') return null;
-                                        if (col.key === 't3' && selectedTerm !== 'T3') return null;
+                // Term Filter logic: 
+                // 1. Hide other terms tuition
+                if (col.key === 't1' && selectedTerm !== 'T1') return null;
+                if (col.key === 't2' && selectedTerm !== 'T2') return null;
+                if (col.key === 't3' && selectedTerm !== 'T3') return null;
 
-                                        // Filter items based on student's fee profile
-                                        const isSelected = (student.selectedFees || ['t1', 't2', 't3', 'admission', 'diary', 'development']).includes(col.key);
-                                        const due = feeStructure[col.key] || 0;
-                                        
-                                        if (!isSelected || due === 0) return null;
-                                        
-                                        return html`
+                // Filter items based on student's fee profile
+                const isSelected = (student.selectedFees || ['t1', 't2', 't3', 'admission', 'diary', 'development']).includes(col.key);
+                const due = feeStructure[col.key] || 0;
+
+                if (!isSelected || due === 0) return null;
+
+                return html`
                                             <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
                                                 <p class="text-[10px] font-bold text-slate-400 uppercase truncate">${col.label}</p>
                                                 <p class="text-[10px] text-slate-500 mb-1">Due: ${due.toLocaleString()}</p>
@@ -432,7 +486,7 @@ export const Fees = ({ data, setData }) => {
                                                 />
                                             </div>
                                         `;
-                                    })}
+            })}
                                 </div>
                                 <div class="pt-4 border-t flex justify-between items-center">
                                     <span class="font-bold text-slate-700">Total to Pay:</span>
@@ -447,54 +501,84 @@ export const Fees = ({ data, setData }) => {
                     </form>
                 </div>
 
-                <div class="bg-slate-900 text-white p-4 sm:p-8 rounded-2xl sm:rounded-3xl shadow-2xl relative overflow-hidden print:bg-white print:text-black print:shadow-none print:p-0 min-h-[500px] receipt-container">
-                    <div class="absolute -top-10 -right-10 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl print:hidden"></div>
+                <div class="bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 text-white p-4 sm:p-8 rounded-2xl sm:rounded-3xl shadow-2xl relative overflow-hidden print:bg-white print:text-black print:shadow-2xl print:border print:border-slate-200 min-h-[600px] receipt-container print-section-receipt">
+                    <!-- Decorative elements -->
+                    <div class="absolute -top-20 -right-20 w-60 h-60 bg-blue-500/10 rounded-full blur-3xl print:hidden"></div>
+                    <div class="absolute -bottom-20 -left-20 w-60 h-60 bg-green-500/10 rounded-full blur-3xl print:hidden"></div>
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-gradient-to-br from-blue-500/5 to-green-500/5 rounded-full blur-3xl print:hidden"></div>
+                    
                     ${receipt ? html`
                         <div class="relative space-y-6 print:space-y-4 print:w-full">
-                            <div class="flex flex-col items-center text-center border-b border-slate-800 print:border-black pb-4">
-                                <img src="${data.settings.schoolLogo}" class="w-12 h-12 sm:w-16 sm:h-16 mb-2 object-contain" alt="Logo" />
-                                <h3 class="text-lg sm:text-2xl font-black uppercase tracking-tight">${data.settings.schoolName}</h3>
-                                <p class="text-[9px] sm:text-sm text-slate-400 print:text-slate-600">${data.settings.schoolAddress}</p>
+                            <!-- Header with logo -->
+                            <div class="flex flex-col items-center text-center border-b-2 border-white/20 print:border-black pb-6">
+                                <div class="w-20 h-20 mb-3 rounded-full bg-white/10 p-1 print:bg-slate-100">
+                                    <img src="${data.settings.schoolLogo}" class="w-full h-full object-contain rounded-full" alt="Logo" />
+                                </div>
+                                <h3 class="text-xl sm:text-3xl font-black uppercase tracking-wider">${data.settings.schoolName}</h3>
+                                <p class="text-[10px] sm:text-sm text-blue-300 print:text-slate-600 mt-1 font-medium">${data.settings.schoolAddress}</p>
+                                <div class="mt-3 px-4 py-1 bg-blue-500/20 rounded-full print:bg-slate-100">
+                                    <p class="text-[10px] font-bold text-blue-300 print:text-slate-700 uppercase tracking-widest">Official Payment Receipt</p>
+                                </div>
                             </div>
                             
-                            <div class="flex flex-col sm:flex-row justify-between items-start gap-4">
-                                <div>
-                                    <h4 class="text-blue-400 print:text-blue-600 font-bold uppercase tracking-widest text-[9px] sm:text-[10px]">Official Payment Receipt - Term ${receipt.term || 'N/A'}</h4>
-                                    <p class="text-[10px] text-slate-400 uppercase font-bold">Academic Year: ${data.settings.academicYear}</p>
-                                    <p class="text-xl sm:text-2xl font-black mt-0.5 sm:mt-1">${receipt.receiptNo}</p>
+                            <!-- Receipt Info -->
+                            <div class="flex flex-col sm:flex-row justify-between items-start gap-4 bg-white/5 print:bg-slate-50 p-4 rounded-xl print:border print:border-slate-200">
+                                <div class="space-y-1">
+                                    <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Receipt Number</p>
+                                    <p class="text-xl sm:text-2xl font-black text-white print:text-black">${receipt.receiptNo}</p>
                                 </div>
-                                <div class="text-left sm:text-right w-full sm:w-auto border-t border-slate-800 sm:border-0 pt-2 sm:pt-0">
-                                    <p class="text-slate-400 print:text-slate-600 text-[10px] sm:text-xs">Date: ${receipt.date}</p>
+                                <div class="text-left sm:text-right">
+                                    <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Date</p>
+                                    <p class="text-lg font-bold text-white print:text-black">${receipt.date}</p>
+                                </div>
+                                <div class="text-left sm:text-right">
+                                    <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Term</p>
+                                    <p class="text-lg font-bold text-white print:text-black">${receipt.term || 'N/A'}</p>
                                 </div>
                             </div>
 
-                            <div class="border-t border-slate-800 print:border-black pt-4 space-y-2">
-                                <div class="flex justify-between text-xs sm:text-sm">
-                                    <span class="text-slate-400 print:text-slate-600">Student:</span>
-                                    <span class="font-bold">${receipt.studentName} (${receipt.grade})</span>
+                            <!-- Student Info -->
+                            <div class="bg-white/10 print:bg-slate-50 p-4 rounded-xl border border-white/10 print:border-slate-200">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Student Name</p>
+                                        <p class="text-lg font-black text-white print:text-black">${receipt.studentName}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Class</p>
+                                        <p class="text-lg font-bold text-white print:text-black">${receipt.grade}</p>
+                                    </div>
                                 </div>
-                                
-                                <div class="mt-4 overflow-x-auto no-scrollbar">
-                                    <div class="grid grid-cols-4 text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase mb-2 border-b border-slate-800 pb-1 print:border-black min-w-[280px]">
+                                <div class="mt-3 pt-3 border-t border-white/10 print:border-slate-200">
+                                    <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold">Academic Year</p>
+                                    <p class="font-bold text-blue-200 print:text-slate-700">${data.settings.academicYear}</p>
+                                </div>
+                            </div>
+
+                            <!-- Payment Details -->
+                            <div class="border-t border-white/20 pt-4 print:border-slate-200">
+                                <p class="text-[9px] text-blue-300 print:text-slate-500 uppercase font-bold mb-3">Payment Details</p>
+                                <div class="overflow-x-auto no-scrollbar">
+                                    <div class="grid grid-cols-4 text-[9px] font-bold text-blue-300 print:text-slate-600 uppercase mb-2 border-b border-white/20 pb-2 print:border-slate-300 min-w-[300px]">
                                         <span>Item</span>
-                                        <span class="text-right">Fee</span>
+                                        <span class="text-right">Amount Due</span>
                                         <span class="text-right">Paid</span>
                                         <span class="text-right">Balance</span>
                                     </div>
-                                    <div class="space-y-1 min-w-[280px]">
+                                    <div class="space-y-2 min-w-[300px]">
                                         ${feeColumns.map(col => {
-                                            const paidNow = receipt.items?.[col.key] || 0;
-                                            
-                                            // Special logic for Arrears B/F
-                                            if (col.key === 'previousArrears') {
-                                                const targetStudent = data.students.find(s => s.name === receipt.studentName);
-                                                const feeAmount = Number(targetStudent?.previousArrears) || 0;
-                                                if (feeAmount === 0 && paidNow === 0) return null;
-                                                
-                                                const totalPaidForItem = (receipt.history || []).reduce((sum, p) => sum + (p.items?.[col.key] || 0), 0);
-                                                const itemBalance = feeAmount - totalPaidForItem;
-                                                
-                                                return html`
+                const paidNow = (receipt.items && receipt.items[col.key]) || 0;
+
+                // Special logic for Arrears B/F
+                if (col.key === 'previousArrears') {
+                    const targetStudent = data.students.find(s => s.name === receipt.studentName);
+                    const feeAmount = Number((targetStudent && targetStudent.previousArrears) || 0) || 0;
+                    if (feeAmount === 0 && paidNow === 0) return null;
+
+                    const totalPaidForItem = (receipt.history || []).reduce((sum, p) => sum + ((p.items && p.items[col.key]) || 0), 0);
+                    const itemBalance = feeAmount - totalPaidForItem;
+
+                    return html`
                                                     <div class="grid grid-cols-4 text-[10px] border-b border-slate-800/30 print:border-slate-100 py-1.5 items-center">
                                                         <span class="text-orange-400 print:text-orange-600 truncate pr-1 font-bold">${col.label}</span>
                                                         <span class="text-right text-slate-300 print:text-slate-400 font-medium">${feeAmount.toLocaleString()}</span>
@@ -506,29 +590,29 @@ export const Fees = ({ data, setData }) => {
                                                         </span>
                                                     </div>
                                                 `;
-                                            }
+                }
 
-                                            // Filter by term if it's a tuition fee
-                                            const currentTermKey = receipt.term?.toLowerCase() || '';
-                                            const isOtherTerm = ['t1', 't2', 't3'].includes(col.key) && col.key !== currentTermKey;
-                                            
-                                            // Determine if this item is part of this specific student's profile
-                                            const targetStudent = data.students.find(s => s.name === receipt.studentName);
-                                            const isSelected = (targetStudent?.selectedFees || ['t1', 't2', 't3']).includes(col.key);
-                                            
-                                            // Don't show other terms unless there was a payment for them (rare)
-                                            if (isOtherTerm && paidNow === 0) return null;
+                // Filter by term if it's a tuition fee
+                const currentTermKey = (receipt.term && receipt.term.toLowerCase()) || '';
+                const isOtherTerm = ['t1', 't2', 't3'].includes(col.key) && col.key !== currentTermKey;
 
-                                            const feeAmount = isSelected ? (receipt.structure?.[col.key] || 0) : 0;
-                                            
-                                            // Only show if it's selected for the student OR if something was paid anyway (history)
-                                            if (feeAmount === 0 && paidNow === 0) return null;
+                // Determine if this item is part of this specific student's profile
+                const targetStudent = data.students.find(s => s.name === receipt.studentName);
+                const isSelected = ((targetStudent && targetStudent.selectedFees) || ['t1', 't2', 't3']).includes(col.key);
 
-                                            // Calculate cumulative balance for this item up to this receipt
-                                            const totalPaidForItem = (receipt.history || []).reduce((sum, p) => sum + (p.items?.[col.key] || 0), 0);
-                                            const itemBalance = feeAmount - totalPaidForItem;
-                                            
-                                            return html`
+                // Don't show other terms unless there was a payment for them (rare)
+                if (isOtherTerm && paidNow === 0) return null;
+
+                const feeAmount = isSelected ? ((receipt.structure && receipt.structure[col.key]) || 0) : 0;
+
+                // Only show if it's selected for the student OR if something was paid anyway (history)
+                if (feeAmount === 0 && paidNow === 0) return null;
+
+                // Calculate cumulative balance for this item up to this receipt
+                const totalPaidForItem = (receipt.history || []).reduce((sum, p) => sum + ((p.items && p.items[col.key]) || 0), 0);
+                const itemBalance = feeAmount - totalPaidForItem;
+
+                return html`
                                                 <div class="grid grid-cols-4 text-[10px] border-b border-slate-800/30 print:border-slate-100 py-1.5 items-center">
                                                     <span class="text-slate-400 print:text-slate-500 truncate pr-1">${col.label}</span>
                                                     <span class="text-right text-slate-300 print:text-slate-400 font-medium">${feeAmount.toLocaleString()}</span>
@@ -540,7 +624,7 @@ export const Fees = ({ data, setData }) => {
                                                     </span>
                                                 </div>
                                             `;
-                                        })}
+            })}
                                     </div>
                                 </div>
 
@@ -611,7 +695,7 @@ export const Fees = ({ data, setData }) => {
                                 <p class="text-[10px] italic">Thank you for your payment.</p>
                             </div>
                             
-                            <button onClick=${() => window.print()} class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold no-print shadow-lg shadow-blue-500/30">
+                            <button onClick=${handlePrintReceipt} class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold no-print shadow-lg shadow-blue-500/30">
                                 Print Receipt
                             </button>
                         </div>
@@ -624,10 +708,26 @@ export const Fees = ({ data, setData }) => {
                 </div>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mt-8 no-print">
-                <div class="p-6 border-b border-slate-50 flex justify-between items-center">
+            <!-- Print-only header for transaction history -->
+            <div class="hidden print:block mb-4 print-section-table">
+                <div class="text-center border-b-2 border-black pb-2 mb-2">
+                    <h1 class="text-xl font-black uppercase">${data.settings.schoolName}</h1>
+                    <p class="text-xs">${data.settings.schoolAddress}</p>
+                    <h2 class="text-lg font-bold mt-2">Payment Transaction Report</h2>
+                    <p class="text-xs">Academic Year: ${data.settings.academicYear} | Generated: ${new Date().toLocaleDateString()}</p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mt-8 print-section-table">
+                <div class="p-6 border-b border-slate-50 flex justify-between items-center no-print">
                     <h3 class="font-bold">Transaction History</h3>
                     <div class="flex items-center gap-4">
+                        <button 
+                            onClick=${handlePrintTable}
+                            class="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1"
+                        >
+                            🖨️ Print Report
+                        </button>
                         <select 
                             class="bg-slate-50 border-0 rounded-lg text-[10px] font-bold uppercase p-2 outline-none focus:ring-1 focus:ring-primary"
                             value=${filterGrade}
@@ -635,6 +735,15 @@ export const Fees = ({ data, setData }) => {
                         >
                             <option value="ALL">All Grades</option>
                             ${data.settings.grades.map(g => html`<option value=${g}>${g}</option>`)}
+                        </select>
+                        <select 
+                            class="bg-slate-50 border-0 rounded-lg text-[10px] font-bold uppercase p-2 outline-none focus:ring-1 focus:ring-primary"
+                            value=${filterVoided}
+                            onChange=${e => setFilterVoided(e.target.value)}
+                        >
+                            <option value="active">Active Only</option>
+                            <option value="voided">Voided Only</option>
+                            <option value="all">Show All</option>
                         </select>
                         <span class="text-xs text-slate-400">${(data.payments || []).length} Total</span>
                     </div>
@@ -647,44 +756,87 @@ export const Fees = ({ data, setData }) => {
                                 <th class="px-6 py-3">Student</th>
                                 <th class="px-6 py-3">Date</th>
                                 <th class="px-6 py-3 text-right">Amount</th>
+                                <th class="px-6 py-3 text-center">Status</th>
                                 <th class="px-6 py-3 text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-50">
                             ${(data.payments || [])
-                                .filter(p => {
-                                    if (filterGrade === 'ALL') return true;
-                                    const s = data.students.find(st => st.id === p.studentId);
-                                    return s?.grade === filterGrade;
-                                })
-                                .slice().reverse().map(p => {
-                                const s = data.students.find(st => st.id === p.studentId);
-                                return html`
-                                    <tr key=${p.id} class="hover:bg-slate-50">
+            .filter(p => {
+                // Filter by grade
+                if (filterGrade !== 'ALL') {
+                    const s = data.students.find(st => st.id === p.studentId);
+                    if ((s && s.grade) !== filterGrade) return false;
+                }
+                // Filter by voided status
+                if (filterVoided === 'active' && p.voided) return false;
+                if (filterVoided === 'voided' && !p.voided) return false;
+                return true;
+            })
+            .slice().reverse().map(p => {
+                const s = data.students.find(st => st.id === p.studentId);
+                return html`
+                                    <tr key=${p.id} class=${p.voided ? 'bg-red-50' : 'hover:bg-slate-50'}>
                                         <td class="px-6 py-4 font-mono text-xs">${p.receiptNo}</td>
-                                        <td class="px-6 py-4 font-medium text-sm">${s?.name || 'Unknown'}</td>
+                                        <td class="px-6 py-4 font-medium text-sm">
+                                            ${(s && s.name) || 'Unknown'}
+                                            ${p.voided && html`<span class="ml-2 text-[8px] bg-red-100 text-red-600 px-1 rounded">VOIDED</span>`}
+                                        </td>
                                         <td class="px-6 py-4 text-xs text-slate-500">${p.date}</td>
-                                        <td class="px-6 py-4 text-right font-bold text-slate-700">${data.settings.currency} ${p.amount.toLocaleString()}</td>
+                                        <td class="px-6 py-4 text-right font-bold ${p.voided ? 'text-red-400 line-through' : 'text-slate-700'}">${data.settings.currency} ${p.amount.toLocaleString()}</td>
+                                        <td class="px-6 py-4 text-center">
+                                            ${p.voided ? html`
+                                                <span class="text-[10px] font-bold text-red-500 bg-red-100 px-2 py-1 rounded">VOIDED</span>
+                                            ` : html`
+                                                <span class="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-1 rounded">PAID</span>
+                                            `}
+                                        </td>
                                         <td class="px-6 py-4 text-center">
                                             <div class="flex items-center justify-center gap-2">
-                                                <button 
-                                                    onClick=${() => viewReceipt(p)}
-                                                    class="text-blue-600 text-[10px] font-bold uppercase hover:underline"
-                                                >
-                                                    View
-                                                </button>
-                                                <button 
-                                                    onClick=${() => handleDeletePayment(p.id)}
-                                                    class="text-red-500 text-[10px] font-bold uppercase hover:underline"
-                                                >
-                                                    Void
-                                                </button>
+                                                ${!p.voided && html`
+                                                    <button 
+                                                        onClick=${() => viewReceipt(p)}
+                                                        class="text-blue-600 text-[10px] font-bold uppercase hover:underline"
+                                                    >
+                                                        View
+                                                    </button>
+                                                    <button 
+                                                        onClick=${() => handleVoidPayment(p.id)}
+                                                        class="text-red-500 text-[10px] font-bold uppercase hover:underline"
+                                                    >
+                                                        Void
+                                                    </button>
+                                                `}
+                                                ${p.voided && html`
+                                                    <button 
+                                                        onClick=${() => handleRestorePayment(p.id)}
+                                                        class="text-green-600 text-[10px] font-bold uppercase hover:underline"
+                                                    >
+                                                        Restore
+                                                    </button>
+                                                `}
                                             </div>
                                         </td>
                                     </tr>
                                 `;
-                            })}
+            })}
                         </tbody>
+                        <tfoot class="bg-slate-50 border-t-2 border-slate-200">
+                            <tr>
+                                <td colspan="3" class="px-6 py-3 text-right font-bold text-xs text-slate-500 uppercase">Total Collected:</td>
+                                <td class="px-6 py-3 text-right font-bold text-green-600">
+                                    ${data.settings.currency} ${(data.payments || []).filter(p => !p.voided).reduce((sum, p) => sum + p.amount, 0).toLocaleString()}
+                                </td>
+                                <td colspan="2" class="no-print"></td>
+                            </tr>
+                            <tr class="no-print">
+                                <td colspan="3" class="px-6 py-2 text-right font-bold text-xs text-red-500 uppercase">Total Voided:</td>
+                                <td class="px-6 py-2 text-right font-bold text-red-400">
+                                    ${data.settings.currency} ${(data.payments || []).filter(p => p.voided).reduce((sum, p) => sum + p.amount, 0).toLocaleString()}
+                                </td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
                 ${(!data.payments || data.payments.length === 0) && html`
@@ -694,28 +846,24 @@ export const Fees = ({ data, setData }) => {
             <style>
                 @media print {
                     .no-print { display: none !important; }
-                    .bg-slate-900 { background-color: white !important; color: black !important; }
-                    .text-white { color: black !important; }
-                    .text-blue-400 { color: #2563eb !important; }
-                    .text-green-400 { color: #166534 !important; }
-                    .text-orange-400 { color: #9a3412 !important; }
-                    .border-slate-800 { border-color: #000 !important; }
+                    
+                    /* Receipt styling */
+                    .receipt-container { 
+                        background: white !important;
+                        color: black !important;
+                        border: 2px solid #000 !important;
+                        box-shadow: none !important;
+                    }
+                    
+                    /* Transaction History Table */
+                    .overflow-x-auto { overflow-x: visible !important; }
+                    table { font-size: 10px !important; }
+                    th, td { padding: 8px 6px !important; }
                     
                     /* Reset mobile constraints for printing */
                     body, html { height: auto !important; overflow: visible !important; }
                     #app { height: auto !important; overflow: visible !important; }
                     main { overflow: visible !important; position: static !important; }
-                    .receipt-container { 
-                        position: absolute !important;
-                        top: 0 !important;
-                        left: 0 !important;
-                        width: 100% !important;
-                        height: auto !important;
-                        padding: 0 !important;
-                        margin: 0 !important;
-                        z-index: 9999 !important;
-                    }
-                    .bg-slate-900.print\:bg-white { background: white !important; }
                 }
             </style>
         </div>

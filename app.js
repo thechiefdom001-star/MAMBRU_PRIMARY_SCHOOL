@@ -21,6 +21,7 @@ import { Settings } from './components/Settings.js';
 import { Attendance } from './components/Attendance.js';
 import { Sidebar } from './components/Sidebar.js';
 import { Storage } from './lib/storage.js';
+import { googleSheetSync } from './lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -35,6 +36,8 @@ const App = () => {
     const [loginPassword, setLoginPassword] = useState('');
     const [showLoginModal, setShowLoginModal] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
+    const [googleSyncStatus, setGoogleSyncStatus] = useState('');
 
     useEffect(() => {
         Storage.save(data);
@@ -92,6 +95,7 @@ const App = () => {
         return () => window.removeEventListener('edutrack:restore', handler);
     }, []);
 
+
     const handleCloudPush = async () => {
         const ws = window.websim || websim;
         if (!ws) {
@@ -105,6 +109,172 @@ const App = () => {
         }
         setIsSyncing(false);
     };
+
+    // helper pushed inside component scope
+    const pushLocalToGoogle = async (sheetData) => {
+        // expects sheetData from fetchAll
+        if (!sheetData || !sheetData.success) return;
+
+        // students
+        const sheetStudents = sheetData.students || [];
+        const sheetMap = new Map(sheetStudents.map(s => [s.admissionNo, s]));
+        for (const s of data.students || []) {
+            const remote = sheetMap.get(s.admissionNo);
+            try {
+                if (!remote) {
+                    await googleSheetSync.pushStudent(s);
+                } else {
+                    // if any field differs, push update
+                    if (JSON.stringify(remote) !== JSON.stringify(s)) {
+                        await googleSheetSync.pushStudent(s);
+                    }
+                }
+            } catch (e) {
+                console.warn('pushLocalToGoogle student error:', e);
+            }
+        }
+
+        // assessments
+        const sheetAssess = sheetData.assessments || [];
+        const assessMap = new Map(sheetAssess.map(a => [
+            `${a.studentId}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`, a
+        ]));
+        for (const a of data.assessments || []) {
+            const key = `${a.studentId}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`;
+            const remote = assessMap.get(key);
+            try {
+                if (!remote) {
+                    await googleSheetSync.pushAssessment(a);
+                } else if (JSON.stringify(remote) !== JSON.stringify(a)) {
+                    await googleSheetSync.pushAssessment(a);
+                }
+            } catch (e) {
+                console.warn('pushLocalToGoogle assessment error:', e);
+            }
+        }
+
+        // attendance
+        const sheetAtt = sheetData.attendance || [];
+        const attMap = new Map(sheetAtt.map(a => [`${a.studentId}-${a.date}`, a]));
+        for (const a of data.attendance || []) {
+            const key = `${a.studentId}-${a.date}`;
+            const remote = attMap.get(key);
+            try {
+                if (!remote) {
+                    await googleSheetSync.pushAttendance(a);
+                } else if (JSON.stringify(remote) !== JSON.stringify(a)) {
+                    await googleSheetSync.pushAttendance(a);
+                }
+            } catch (e) {
+                console.warn('pushLocalToGoogle attendance error:', e);
+            }
+        }
+    };
+
+    const handleGoogleSync = async () => {
+        if (!data.settings.googleScriptUrl) {
+            alert("Google Sheet not configured. Go to Settings > Google Sheet Sync to configure.");
+            return;
+        }
+        
+        setIsGoogleSyncing(true);
+        setGoogleSyncStatus('Syncing with Google Sheet...');
+        
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            // Fetch ALL data from Google Sheet
+            let result = await googleSheetSync.fetchAll();
+            
+            if (result.success) {
+                console.log('Google data (initial):', result);
+
+                // send any local entries that don't exist yet on sheet
+                await pushLocalToGoogle(result);
+
+                // after pushing, re-fetch to get updated sheet state
+                result = await googleSheetSync.fetchAll();
+
+                // Merge with local data
+                const merged = Storage.mergeData(data, {
+                    students: result.students || [],
+                    assessments: result.assessments || [],
+                    attendance: result.attendance || []
+                }, 'all');
+                
+                setData(merged);
+                setGoogleSyncStatus(`✓ Synced! ${result.students?.length || 0} students, ${result.assessments?.length || 0} marks from Google`);
+                setTimeout(() => setGoogleSyncStatus(''), 5000);
+            } else {
+                alert("Sync failed: " + result.error);
+                setGoogleSyncStatus('');
+            }
+        } catch (error) {
+            alert("Sync error: " + error.message);
+            setGoogleSyncStatus('');
+        }
+        
+        setIsGoogleSyncing(false);
+    };
+
+    // when the browser regains connectivity, automatically sync with Google
+    useEffect(() => {
+        const onOnline = () => {
+            if (data.settings?.googleScriptUrl) {
+                handleGoogleSync();
+            }
+        };
+        window.addEventListener('online', onOnline);
+        return () => window.removeEventListener('online', onOnline);
+    }, [data.settings?.googleScriptUrl, handleGoogleSync]);
+
+    // periodic sync every 5 minutes if configured and online
+    useEffect(() => {
+        if (!data.settings?.googleScriptUrl) return;
+        const interval = setInterval(() => {
+            if (navigator.onLine) {
+                handleGoogleSync();
+            }
+        }, 5 * 60 * 1000); // 5 minutes
+        return () => clearInterval(interval);
+    }, [data.settings?.googleScriptUrl, handleGoogleSync]);
+
+    // Auto-sync on app load if Google Sheet configured
+    useEffect(() => {
+        if (!data || !data.settings?.googleScriptUrl) return;
+        
+        // Auto-pull from Google on load (silent sync)
+        const autoSync = async () => {
+            setGoogleSyncStatus('Loading from Google...');
+            googleSheetSync.setSettings(data.settings);
+            try {
+                let result = await googleSheetSync.fetchAll();
+                if (result.success && (result.students?.length > 0 || result.assessments?.length > 0)) {
+                    // push any pending local records first
+                    await pushLocalToGoogle(result);
+                    // refetch after pushing
+                    result = await googleSheetSync.fetchAll();
+                    // Merge Google data with local
+                    const merged = Storage.mergeData(data, {
+                        students: result.students,
+                        assessments: result.assessments,
+                        attendance: result.attendance
+                    }, 'all');
+                    setData(merged);
+                    setGoogleSyncStatus(`✓ Loaded ${result.students?.length || 0} students, ${result.assessments?.length || 0} marks`);
+                    console.log('Auto-synced from Google:', { students: result.students?.length, assessments: result.assessments?.length });
+                } else {
+                    setGoogleSyncStatus('');
+                }
+            } catch (e) {
+                console.log('Auto-sync skipped:', e.message);
+                setGoogleSyncStatus('');
+            }
+        };
+        
+        // Delay slightly to let app initialize
+        setTimeout(autoSync, 3000);
+    }, [data?.settings?.googleScriptUrl]);
 
     useEffect(() => {
         if (!data || !data.settings) return;
@@ -394,6 +564,26 @@ const App = () => {
                     >
                         <span class=${isSyncing ? 'animate-spin' : ''}>${isSyncing ? '⏳' : '☁️'}</span>
                         <span class="hidden sm:inline">${isSyncing ? 'Syncing...' : 'Cloud Sync'}</span>
+                    </button>
+
+                    <button 
+                        onClick=${() => {
+                            if (!data.settings.googleScriptUrl) {
+                                alert("Google Sheet not configured. Go to Settings > Teacher Data Sync.");
+                                return;
+                            }
+                            handleGoogleSync();
+                        }}
+                        disabled=${isGoogleSyncing}
+                        class=${`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all border ${isGoogleSyncing
+            ? 'bg-green-50 border-green-200 text-green-600 animate-pulse'
+            : googleSyncStatus?.includes('✓')
+                ? 'bg-green-100 border-green-300 text-green-700'
+                : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-green-500 hover:text-green-600'
+        }`}
+                    >
+                        <span class=${isGoogleSyncing ? 'animate-spin' : ''}>${isGoogleSyncing ? '⏳' : '📥'}</span>
+                        <span class="hidden sm:inline">${googleSyncStatus || 'Get from Sheet'}</span>
                     </button>
 
                     <div class="h-8 w-px bg-slate-100 mx-1 hidden sm:block"></div>

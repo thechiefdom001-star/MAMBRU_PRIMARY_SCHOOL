@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -11,6 +12,8 @@ export const Assessments = ({ data, setData }) => {
     const [selectedSubject, setSelectedSubject] = useState('');
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [selectedExamType, setSelectedExamType] = useState('Opener');
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [syncStatus, setSyncStatus] = useState('');
 
     const streams = data?.settings?.streams || [];
     const subjects = Storage.getSubjectsForGrade(selectedGrade);
@@ -61,7 +64,7 @@ export const Assessments = ({ data, setData }) => {
         }
 
         const newAssessment = {
-            id: existing?.id || (Date.now() + Math.random().toString()),
+            id: existing?.id || ('A-' + Date.now() + Math.random().toString().slice(2, 6)),
             studentId,
             subject: selectedSubject,
             term: selectedTerm,
@@ -72,6 +75,72 @@ export const Assessments = ({ data, setData }) => {
             date: new Date().toISOString().split('T')[0]
         };
         setData({ ...data, assessments: [...otherAssessments, newAssessment] });
+        
+        // Auto-sync to Google Sheet
+        if (data.settings.googleScriptUrl) {
+            syncToGoogle([newAssessment]);
+        }
+    };
+    
+    const syncToGoogle = async (assessments) => {
+        if (!data.settings.googleScriptUrl || isSyncing) return;
+        
+        setIsSyncing(true);
+        setSyncStatus('Syncing to Google Sheet...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            for (const assessment of assessments) {
+                // Get student info for the record
+                const student = data.students.find(s => s.id === assessment.studentId);
+                await googleSheetSync.pushAssessment({
+                    ...assessment,
+                    studentName: student?.name || 'Unknown',
+                    grade: student?.grade || ''
+                });
+            }
+            setSyncStatus('✓ Synced!');
+            setTimeout(() => setSyncStatus(''), 2000);
+        } catch (error) {
+            console.error('Sync error:', error);
+            setSyncStatus('Sync failed');
+            setTimeout(() => setSyncStatus(''), 3000);
+        }
+        
+        setIsSyncing(false);
+    };
+    
+    const deleteAssessment = async (assessmentId) => {
+        if (!confirm('Delete this assessment record?')) return;
+        
+        const updatedAssessments = data.assessments.filter(a => a.id !== assessmentId);
+        setData({ ...data, assessments: updatedAssessments });
+        
+        // Sync deletion to Google Sheet
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus('Syncing delete...');
+            googleSheetSync.setSettings(data.settings);
+            await googleSheetSync.deleteAssessment(assessmentId);
+            setSyncStatus('✓ Deleted from Google!');
+            setTimeout(() => setSyncStatus(''), 2000);
+        }
+    };
+    
+    const syncAllToGoogle = async () => {
+        if (!data.settings.googleScriptUrl) {
+            alert('Google Sheet not configured. Go to Settings > Teacher Data Sync.');
+            return;
+        }
+        
+        if (!confirm('Sync all current assessments to Google Sheet?')) return;
+        
+        const currentAssessments = data.assessments.filter(a => 
+            a.grade === selectedGrade && 
+            a.term === selectedTerm && 
+            a.examType === selectedExamType
+        );
+        
+        await syncToGoogle(currentAssessments);
     };
 
     const levels = [
@@ -87,9 +156,26 @@ export const Assessments = ({ data, setData }) => {
 
     return html`
         <div class="space-y-6">
-            <div>
-                <h2 class="text-2xl font-bold">CBC Competency Tracker</h2>
-                <p class="text-slate-500">Assess students based on curriculum sub-strands</p>
+            <div class="flex justify-between items-start no-print">
+                <div>
+                    <h2 class="text-2xl font-bold">CBC Competency Tracker</h2>
+                    <p class="text-slate-500">Assess students based on curriculum sub-strands</p>
+                </div>
+                ${data.settings.googleScriptUrl && html`
+                    <div class="flex items-center gap-2">
+                        ${syncStatus && html`
+                            <span class="text-xs font-bold ${syncStatus.includes('✓') ? 'text-green-600' : 'text-blue-600'}">${syncStatus}</span>
+                        `}
+                        <button 
+                            onClick=${syncAllToGoogle}
+                            disabled=${isSyncing}
+                            class="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"
+                        >
+                            <span>${isSyncing ? '⏳' : '📤'}</span>
+                            ${isSyncing ? 'Syncing...' : 'Sync to Sheet'}
+                        </button>
+                    </div>
+                `}
             </div>
 
             <div class="flex flex-col md:flex-row flex-wrap gap-4 no-print">
@@ -179,6 +265,15 @@ export const Assessments = ({ data, setData }) => {
                                                 class="w-16 p-2 bg-slate-50 border border-slate-100 rounded text-center font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                                 placeholder="0-100"
                                             />
+                                            ${assessment && html`
+                                                <button 
+                                                    onClick=${() => deleteAssessment(assessment.id)}
+                                                    title="Delete"
+                                                    class="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center text-xs font-bold"
+                                                >
+                                                    ✕
+                                                </button>
+                                            `}
                                         </div>
                                         <div class="flex gap-1">
                                             ${levels.map(l => html`

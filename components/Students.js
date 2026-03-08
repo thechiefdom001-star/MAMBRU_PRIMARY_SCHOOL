@@ -2,63 +2,93 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
 export const Students = ({ data, setData, onSelectStudent }) => {
     const [showAdd, setShowAdd] = useState(false);
+    const [syncStatus, setSyncStatus] = useState('');
     const [filterGrade, setFilterGrade] = useState('ALL');
     const [filterStream, setFilterStream] = useState('ALL');
     const [filterFinance, setFilterFinance] = useState('ALL');
-    
+
     const defaultFeeOptions = [
         { key: 'admission', label: 'Admission' }, { key: 'diary', label: 'Diary' }, { key: 'development', label: 'Development' },
         { key: 't1', label: 'T1 Tuition' }, { key: 't2', label: 'T2 Tuition' }, { key: 't3', label: 'T3 Tuition' },
-        { key: 'boarding', label: 'Boarding' }, { key: 'breakfast', label: 'Breakfast' }, { key: 'lunch', label: 'Lunch' }, 
-        { key: 'trip', label: 'Trip' }, { key: 'bookFund', label: 'Books' }, { key: 'caution', label: 'Caution' }, 
+        { key: 'boarding', label: 'Boarding' }, { key: 'breakfast', label: 'Breakfast' }, { key: 'lunch', label: 'Lunch' },
+        { key: 'trip', label: 'Trip' }, { key: 'bookFund', label: 'Books' }, { key: 'caution', label: 'Caution' },
         { key: 'uniform', label: 'Uniform' }, { key: 'studentCard', label: 'School ID' }, { key: 'remedial', label: 'Remedials' },
         { key: 'assessmentFee', label: 'Assessment Fee' }, { key: 'projectFee', label: 'Project Fee' },
         { key: 'activityFees', label: 'Activity Fees' }, { key: 'tieAndBadge', label: 'Tie & Badge' }, { key: 'academicSupport', label: 'Academic Support' },
         { key: 'pta', label: 'PTA' }
     ];
-    
+
     const customFeeOptions = (data.settings.customFeeColumns || []).map(cf => ({ key: cf.key, label: cf.label }));
     const feeOptions = [...defaultFeeOptions, ...customFeeOptions];
 
     const [editingId, setEditingId] = useState(null);
     const streams = data.settings.streams || ['A', 'B', 'C'];
-    const [newStudent, setNewStudent] = useState({ 
-        name: '', 
-        grade: data.settings.grades[0] || 'GRADE 1', 
+    const [newStudent, setNewStudent] = useState({
+        name: '',
+        grade: data.settings.grades[0] || 'GRADE 1',
         stream: streams[0] || '',
         category: 'Normal',
         admissionNo: '',
-        admissionDate: new Date().toISOString().slice(0,10),
+        admissionDate: new Date().toISOString().slice(0, 10),
         assessmentNo: '',
         upiNo: '',
         parentContact: '',
         previousArrears: 0,
-        selectedFees: ['t1', 't2', 't3', 'admission', 'diary', 'development', 'pta'] 
+        selectedFees: ['t1', 't2', 't3', 'admission', 'diary', 'development', 'pta']
     });
 
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
+
+        // Save student first
         if (editingId) {
-            const updated = data.students.map(s => s.id === editingId ? { ...newStudent, id: editingId } : s);
+            const updatedStudent = { ...newStudent, id: editingId };
+            const updated = data.students.map(s => s.id === editingId ? updatedStudent : s);
             setData({ ...data, students: updated });
             setEditingId(null);
+
+            // also sync update to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Updating Google...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.pushStudent(updatedStudent);
+                if (!resp.success) {
+                    console.warn('Failed to update student on Google:', resp.error);
+                }
+                setSyncStatus('✓ Synced!');
+                setTimeout(() => setSyncStatus(''), 2000);
+            }
         } else {
             const id = Date.now().toString();
-            setData({ ...data, students: [...(data.students || []), { ...newStudent, id }] });
+            const newStudentWithId = { ...newStudent, id };
+            setData({ ...data, students: [...(data.students || []), newStudentWithId] });
+
+            // Sync to Google Sheet
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Syncing to Google...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.pushStudent(newStudentWithId);
+                if (!resp.success) {
+                    console.warn('Failed to add student to Google:', resp.error);
+                }
+                setSyncStatus('✓ Synced!');
+                setTimeout(() => setSyncStatus(''), 2000);
+            }
         }
         setShowAdd(false);
         resetForm();
     };
 
     const resetForm = () => {
-        setNewStudent({ 
-            name: '', 
-            grade: data.settings.grades[0] || 'GRADE 1', 
+        setNewStudent({
+            name: '',
+            grade: data.settings.grades[0] || 'GRADE 1',
             category: 'Normal',
             admissionNo: '',
             assessmentNo: '',
@@ -80,7 +110,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
     const handlePromote = (student) => {
         const grades = data.settings.grades;
         const currentIndex = grades.indexOf(student.grade);
-        
+
         if (currentIndex === -1 || currentIndex === grades.length - 1) {
             alert("No further grade to promote to.");
             return;
@@ -91,7 +121,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
 
         // Calculate current balance
         const financials = Storage.getStudentFinancials(student, data.payments, data.settings);
-        
+
         const updatedStudents = data.students.map(s => {
             if (s.id === student.id) {
                 return {
@@ -116,7 +146,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
 
     const toggleFee = (key) => {
         const current = newStudent.selectedFees || [];
-        const updated = current.includes(key) 
+        const updated = current.includes(key)
             ? current.filter(k => k !== key)
             : [...current, key];
         setNewStudent({ ...newStudent, selectedFees: updated });
@@ -125,7 +155,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
     const filteredStudents = (data.students || []).filter(s => {
         const matchesGrade = filterGrade === 'ALL' || s.grade === filterGrade;
         const matchesStream = filterStream === 'ALL' || s.stream === filterStream;
-        
+
         if (filterFinance === 'ALL') return matchesGrade && matchesStream;
 
         const feeStructure = data.settings.feeStructures?.find(f => f.grade === s.grade);
@@ -137,7 +167,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
         if (filterFinance === 'FULL') return matchesGrade && matchesStream && balance <= 0 && totalDue > 0;
         if (filterFinance === 'HALF') return matchesGrade && matchesStream && totalPaid >= (totalDue / 2) && balance > 0;
         if (filterFinance === 'ARREARS') return matchesGrade && matchesStream && balance > 0;
-        
+
         return matchesGrade && matchesStream;
     });
 
@@ -148,6 +178,9 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                     <h2 class="text-2xl font-bold">Students Directory</h2>
                     <p class="text-slate-500 text-sm">Manage student enrollment and registration data</p>
                 </div>
+                ${syncStatus && html`
+                    <span class="text-xs font-bold ${syncStatus.includes('✓') ? 'text-green-600' : 'text-blue-600'}">${syncStatus}</span>
+                `}
                 <div class="flex flex-wrap gap-2 no-print w-full md:w-auto">
                     <select 
                         class="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
@@ -177,7 +210,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                     </select>
                     <button onClick=${() => window.print()} class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200">Print List</button>
                     <button 
-                        onClick=${() => { if(showAdd) resetForm(); setShowAdd(!showAdd); }}
+                        onClick=${() => { if (showAdd) resetForm(); setShowAdd(!showAdd); }}
                         class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-blue-700"
                     >
                         ${showAdd ? 'Cancel' : 'Add Student'}
@@ -202,7 +235,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 required 
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.name}
-                                onInput=${(e) => setNewStudent({...newStudent, name: e.target.value})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, name: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -212,7 +245,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 required 
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.admissionNo}
-                                onInput=${(e) => setNewStudent({...newStudent, admissionNo: e.target.value})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, admissionNo: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -221,7 +254,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 type="date"
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none font-bold"
                                 value=${newStudent.admissionDate}
-                                onChange=${(e) => setNewStudent({...newStudent, admissionDate: e.target.value})}
+                                onChange=${(e) => setNewStudent({ ...newStudent, admissionDate: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -229,7 +262,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                             <select 
                                 class="w-full p-3 bg-slate-50 rounded-xl border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.grade}
-                                onChange=${(e) => setNewStudent({...newStudent, grade: e.target.value})}
+                                onChange=${(e) => setNewStudent({ ...newStudent, grade: e.target.value })}
                             >
                                 ${data.settings.grades.map(g => html`<option value=${g}>${g}</option>`)}
                             </select>
@@ -239,7 +272,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                             <select 
                                 class="w-full p-3 bg-slate-50 rounded-xl border-0 focus:ring-2 focus:ring-blue-500 outline-none font-bold"
                                 value=${newStudent.category || 'Normal'}
-                                onChange=${(e) => setNewStudent({...newStudent, category: e.target.value})}
+                                onChange=${(e) => setNewStudent({ ...newStudent, category: e.target.value })}
                             >
                                 <option value="Normal">Normal (Full Fees)</option>
                                 <option value="Staff">Staff Child (50% Off)</option>
@@ -252,7 +285,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 placeholder="ASN-123456" 
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.assessmentNo}
-                                onInput=${(e) => setNewStudent({...newStudent, assessmentNo: e.target.value})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, assessmentNo: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -261,7 +294,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 placeholder="UPI-XXXX" 
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.upiNo}
-                                onInput=${(e) => setNewStudent({...newStudent, upiNo: e.target.value})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, upiNo: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -269,7 +302,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                             <select
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.stream}
-                                onChange=${(e) => setNewStudent({...newStudent, stream: e.target.value})}
+                                onChange=${(e) => setNewStudent({ ...newStudent, stream: e.target.value })}
                             >
                                 ${streams.map(s => html`<option value=${s}>Stream ${s}</option>`)}
                             </select>
@@ -280,7 +313,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 placeholder="e.g. 0712345678" 
                                 class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
                                 value=${newStudent.parentContact}
-                                onInput=${(e) => setNewStudent({...newStudent, parentContact: e.target.value})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, parentContact: e.target.value })}
                             />
                         </div>
                         <div class="space-y-1">
@@ -290,7 +323,7 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                                 placeholder="0.00" 
                                 class="w-full p-3 bg-orange-50 rounded-lg border-0 focus:ring-2 focus:ring-orange-500 outline-none font-bold text-orange-700"
                                 value=${newStudent.previousArrears}
-                                onInput=${(e) => setNewStudent({...newStudent, previousArrears: Number(e.target.value)})}
+                                onInput=${(e) => setNewStudent({ ...newStudent, previousArrears: Number(e.target.value) })}
                             />
                         </div>
                     </div>
@@ -298,11 +331,10 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                         <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Applicable Fee Items (Fee Profile)</label>
                         <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
                             ${feeOptions.map(opt => html`
-                                <label key=${opt.key} class=${`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
-                                    (newStudent.selectedFees || []).includes(opt.key) 
-                                        ? 'bg-blue-50 border-blue-200 text-blue-700' 
-                                        : 'bg-white border-slate-100 text-slate-400'
-                                }`}>
+                                <label key=${opt.key} class=${`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${(newStudent.selectedFees || []).includes(opt.key)
+            ? 'bg-blue-50 border-blue-200 text-blue-700'
+            : 'bg-white border-slate-100 text-slate-400'
+        }`}>
                                     <input 
                                         type="checkbox" 
                                         class="hidden"

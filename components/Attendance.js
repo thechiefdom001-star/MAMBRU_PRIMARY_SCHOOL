@@ -71,6 +71,14 @@ export const Attendance = ({ data, setData }) => {
             ...data,
             attendance: [...otherRecords, newRecord]
         });
+
+        // attempt immediate push if sheet configured
+        if (data.settings.googleScriptUrl) {
+            googleSheetSync.setSettings(data.settings);
+            googleSheetSync.pushAttendance(newRecord).catch(err => {
+                console.warn('Attendance push failed:', err);
+            });
+        }
     };
 
     const markWeekAllPresent = () => {
