@@ -19,7 +19,13 @@ export const FeesRegister = ({ data }) => {
         const feeStructure = settings.feeStructures?.find(f => f.grade === student.grade);
         if (!feeStructure) return { totalDue: 0, totalPaid: 0, balance: 0, termBalances: {} };
 
-        const selectedKeys = student.selectedFees || ['t1', 't2', 't3'];
+        // Normalize selectedFees in case it's a string from Google Sheets
+        let selectedKeys = student.selectedFees;
+        if (typeof selectedKeys === 'string') {
+            selectedKeys = selectedKeys.split(',').map(f => f.trim()).filter(f => f);
+        } else if (!Array.isArray(selectedKeys)) {
+            selectedKeys = ['t1', 't2', 't3'];
+        }
         
         // Cumulative totals
         const totalDue = (Number(student.previousArrears) || 0) + selectedKeys.reduce((sum, key) => sum + (feeStructure[key] || 0), 0);

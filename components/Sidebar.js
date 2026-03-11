@@ -63,6 +63,7 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
 
     const renderMenuItem = (item) => html`
         <button
+            type="button"
             key=${item.id}
             onClick=${() => handleLinkClick(item.id)}
             class=${`w-full flex items-center px-4 py-2.5 rounded-xl transition-all duration-200 group relative ${
@@ -87,6 +88,7 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
             <div class=${`p-4 border-b border-slate-900 flex items-center ${isMini ? 'justify-center' : 'justify-between'}`}>
                 ${(!isMini || isMobileOpen) && html`<span class="font-black text-xs uppercase tracking-tighter text-slate-500">Navigation</span>`}
                 <button 
+                    type="button"
                     onClick=${() => setCollapsed(!isCollapsed)}
                     class=${`p-2 hover:bg-slate-800 rounded-lg text-slate-500 transition-colors ${isMobileOpen ? 'hidden md:block' : ''}`}
                 >
@@ -104,6 +106,7 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                         return html`
                             <div class="space-y-1">
                                 <button 
+                                    type="button"
                                     onClick=${() => toggleGroup(node.id)}
                                     class=${`w-full flex items-center p-2 rounded-lg text-slate-500 hover:text-white transition-colors ${isMini ? 'justify-center' : 'justify-between'}`}
                                 >
@@ -122,6 +125,7 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                                     <div class="flex flex-col gap-1 items-center">
                                         ${node.items.map(item => html`
                                             <button 
+                                                type="button"
                                                 onClick=${() => handleLinkClick(item.id)}
                                                 class=${`p-2 rounded-lg transition-all ${currentView === item.id ? 'bg-primary/20 text-primary' : 'text-slate-600 hover:text-slate-300'}`}
                                                 title=${item.label}

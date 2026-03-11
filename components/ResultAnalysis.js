@@ -47,7 +47,10 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                 examTypes.forEach(type => {
                     const matches = studentAssessments.filter(a => a.subject === subject && a.examType === type);
                     const avgScore = matches.length > 0 
-                        ? Math.round(matches.reduce((sum, m) => sum + Number(m.score), 0) / matches.length)
+                        ? Math.round(matches.reduce((sum, m) => {
+                            const score = Number(m.score);
+                            return sum + (isNaN(score) ? 0 : score);
+                        }, 0) / matches.length)
                         : null;
                     scores[type] = avgScore;
                 });

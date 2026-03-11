@@ -47,7 +47,7 @@ export const SeniorSchool = ({ data, setData }) => {
         .filter(s => filterGrade === 'ALL' || s.grade === filterGrade)
         .filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const currentStudent = data.students.find(s => s.id === selectedStudentId);
+    const currentStudent = (data.students || []).find(s => String(s.id) === String(selectedStudentId));
 
     const toggleElective = (subject) => {
         if (!currentStudent) return;

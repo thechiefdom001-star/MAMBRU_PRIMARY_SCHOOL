@@ -16,7 +16,8 @@
 const SHEET_NAMES = {
   STUDENTS: 'Students',
   ASSESSMENTS: 'Assessments',
-  ATTENDANCE: 'Attendance'
+  ATTENDANCE: 'Attendance',
+  ACTIVITY: 'Activity'  // For tracking active users
 };
 
 // Column headers for each sheet
@@ -49,6 +50,13 @@ function initializeSheets() {
   if (!attendanceSheet) {
     attendanceSheet = ss.insertSheet(SHEET_NAMES.ATTENDANCE);
     attendanceSheet.appendRow(ATTENDANCE_HEADERS);
+  }
+  
+  // Create Activity sheet
+  let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
+  if (!activitySheet) {
+    activitySheet = ss.insertSheet(SHEET_NAMES.ACTIVITY);
+    activitySheet.appendRow(['device', 'lastActivity', 'timestamp']);
   }
   
   return { success: true, message: 'Sheets initialized successfully' };
@@ -157,6 +165,52 @@ function doGet(e) {
         
       case 'ping':
         response = { success: true, message: 'EduTrack Google Sync is active!', timestamp: new Date().toISOString() };
+        break;
+        
+      case 'setActive':
+        const device = e.parameter.device;
+        const timestamp = e.parameter.timestamp;
+        response = setActiveUser(device, timestamp);
+        break;
+        
+      case 'getActiveUsers':
+        response = getActiveUsers();
+        break;
+        
+      case 'bulkPushStudents':
+        let studentData = {};
+        if (e.parameter.data) {
+          try {
+            studentData = JSON.parse(e.parameter.data);
+          } catch (err) {
+            return ContentService.createTextOutput(JSON.stringify({ error: 'Invalid JSON data' })).setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+        response = bulkPushRecords(SHEET_NAMES.STUDENTS, studentData.students || [], STUDENT_HEADERS);
+        break;
+        
+      case 'bulkPushAssessments':
+        let assessData = {};
+        if (e.parameter.data) {
+          try {
+            assessData = JSON.parse(e.parameter.data);
+          } catch (err) {
+            return ContentService.createTextOutput(JSON.stringify({ error: 'Invalid JSON data' })).setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+        response = bulkPushRecords(SHEET_NAMES.ASSESSMENTS, assessData.assessments || [], ASSESSMENT_HEADERS);
+        break;
+        
+      case 'bulkPushAttendance':
+        let attData = {};
+        if (e.parameter.data) {
+          try {
+            attData = JSON.parse(e.parameter.data);
+          } catch (err) {
+            return ContentService.createTextOutput(JSON.stringify({ error: 'Invalid JSON data' })).setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+        response = bulkPushRecords(SHEET_NAMES.ATTENDANCE, attData.attendance || [], ATTENDANCE_HEADERS);
         break;
         
       default:
@@ -281,6 +335,14 @@ function doPost(e) {
         response = deleteRecord(SHEET_NAMES.STUDENTS, 'id', data.recordId, STUDENT_HEADERS);
         break;
         
+      case 'setActive':
+        response = setActiveUser(data.device, data.timestamp);
+        break;
+        
+      case 'getActiveUsers':
+        response = getActiveUsers();
+        break;
+        
       default:
         response = { error: 'Unknown action' };
     }
@@ -313,7 +375,19 @@ function getAllRecords(sheetName, headers) {
   return data.map(row => {
     let obj = {};
     headers.forEach((header, index) => {
-      obj[header] = row[index];
+      let value = row[index];
+      
+      // Clean corrupted selectedFees values (Java object references)
+      if (header === 'selectedFees' && typeof value === 'string' && value.includes('java.lang.Object')) {
+        value = 't1,t2,t3'; // Default format
+      }
+      
+      // Ensure all values are properly serializable (convert objects/arrays to strings)
+      if (value && typeof value === 'object') {
+        value = String(value).includes('java.lang') ? '' : JSON.stringify(value);
+      }
+      
+      obj[header] = value;
     });
     return obj;
   });
@@ -476,6 +550,80 @@ function replaceAllRecords(sheetName, records, headers) {
 }
 
 /**
+ * Bulk push records - fast batch add/update for multiple records
+ */
+function bulkPushRecords(sheetName, records, headers) {
+  if (!records || records.length === 0) {
+    return { success: true, count: 0, message: 'No records to push' };
+  }
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow(headers);
+  }
+  
+  try {
+    const existingData = sheet.getDataRange().getValues();
+    const idIndex = headers.indexOf('id');
+    const keyIndex = sheetName === SHEET_NAMES.STUDENTS ? headers.indexOf('admissionNo') : -1;
+    
+    let updatedCount = 0;
+    let addedCount = 0;
+    
+    // Build a map of existing records for faster lookup
+    const existingMap = new Map();
+    for (let i = 1; i < existingData.length; i++) {
+      if (idIndex >= 0 && existingData[i][idIndex]) {
+        existingMap.set(String(existingData[i][idIndex]), i);
+      } else if (keyIndex >= 0 && existingData[i][keyIndex]) {
+        existingMap.set(String(existingData[i][keyIndex]), i);
+      }
+    }
+    
+    // Batch updates
+    const newRows = [];
+    
+    for (const record of records) {
+      const recordId = String(record.id || record[headers[0]] || '');
+      const recordKey = keyIndex >= 0 ? String(record[headers[keyIndex]] || '') : recordId;
+      const lookupKey = keyIndex >= 0 ? recordKey : recordId;
+      const existingRowIndex = existingMap.get(lookupKey);
+      
+      const values = headers.map(h => record[h] || '');
+      
+      if (existingRowIndex) {
+        // Update existing row
+        sheet.getRange(existingRowIndex + 1, 1, 1, values.length).setValues([values]);
+        updatedCount++;
+      } else {
+        // Collect new rows for batch insert
+        newRows.push(values);
+        addedCount++;
+      }
+    }
+    
+    // Batch insert all new rows at once
+    if (newRows.length > 0) {
+      const lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow + 1, 1, newRows.length, headers.length).setValues(newRows);
+    }
+    
+    return {
+      success: true,
+      count: updatedCount + addedCount,
+      updated: updatedCount,
+      added: addedCount,
+      message: `Bulk push: ${addedCount} added, ${updatedCount} updated`
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Delete a record
  */
 function deleteRecord(sheetName, keyField, keyValue, headers) {
@@ -540,4 +688,88 @@ function testSetup() {
     studentCount: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS).length,
     assessmentCount: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS).length
   };
+}
+
+/**
+ * Track active users - update last activity timestamp
+ */
+function setActiveUser(deviceName, timestamp) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
+    
+    if (!activitySheet) {
+      activitySheet = ss.insertSheet(SHEET_NAMES.ACTIVITY);
+      activitySheet.appendRow(['device', 'lastActivity', 'timestamp']);
+    }
+    
+    // Find existing device or add new
+    const data = activitySheet.getDataRange().getValues();
+    const deviceRow = data.findIndex(row => row[0] === deviceName);
+    
+    const now = new Date(timestamp ? parseInt(timestamp) : Date.now());
+    const nowStr = now.toISOString();
+    const ts = timestamp ? parseInt(timestamp) : Date.now();
+    
+    if (deviceRow > 0) {
+      // Update existing row
+      activitySheet.getRange(deviceRow + 1, 2, 1, 2).setValues([[nowStr, ts.toString()]]);
+    } else {
+      // Add new row
+      activitySheet.appendRow([deviceName, nowStr, ts.toString()]);
+    }
+    
+    return { success: true, message: 'Active status updated', device: deviceName };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Get active users - returns users active in last 5 minutes with details
+ */
+function getActiveUsers() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
+    
+    if (!activitySheet) {
+      return { success: true, activeCount: 0, activeUsers: [], lastActivity: null };
+    }
+    
+    const data = activitySheet.getDataRange().getValues();
+    const headers = data[0];
+    const rows = data.slice(1);
+    
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    let activeCount = 0;
+    let lastActivity = null;
+    const activeUsers = [];
+    
+    rows.forEach(row => {
+      const timestamp = parseInt(row[2]);
+      if (timestamp && timestamp > fiveMinutesAgo) {
+        activeCount++;
+        activeUsers.push({
+          device: String(row[0] || 'Unknown Device'),
+          lastActivity: row[1] ? new Date(row[1]).toISOString() : new Date(timestamp).toISOString(),
+          timestamp: timestamp
+        });
+        if (!lastActivity || timestamp > parseInt(lastActivity)) {
+          lastActivity = timestamp;
+        }
+      }
+    });
+    
+    // Sort by most recent first
+    activeUsers.sort((a, b) => b.timestamp - a.timestamp);
+    return { 
+      success: true, 
+      activeCount: activeCount,
+      activeUsers: activeUsers,
+      lastActivity: lastActivity ? lastActivity.toString() : null 
+    };
+  } catch (error) {
+    return { success: false, activeCount: 0, activeUsers: [], error: error.message };
+  }
 }

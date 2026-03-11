@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -181,6 +182,17 @@ export const Marklist = ({ data = {}, setData = () => {} }) => {
                                                         }
                                                         
                                                         setData(newData);
+                                                        
+                                                        // Sync to Google Sheet if configured
+                                                        if (data.settings?.googleScriptUrl) {
+                                                            googleSheetSync.setSettings(data.settings);
+                                                            const student = (data.students || []).find(s => String(s.id) === String(newAssessment.studentId));
+                                                            googleSheetSync.pushAssessment({
+                                                                ...newAssessment,
+                                                                studentName: student?.name || 'Unknown',
+                                                                grade: student?.grade || ''
+                                                            }).catch(err => console.warn('Marklist Google sync failed:', err));
+                                                        }
                                                     }}
                                                 />
                                                 <span class="hidden print:inline text-xs font-bold">${score !== null ? score : '-'}</span>

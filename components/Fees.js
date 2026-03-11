@@ -51,10 +51,72 @@ export const Fees = ({ data, setData }) => {
     const customFeeColumns = (data.settings.customFeeColumns || []).map(cf => ({ key: cf.key, label: cf.label }));
     const feeColumns = [...defaultFeeColumns, ...customFeeColumns];
 
+    // Get all available fee structures - MUST always have data
+    const allFeeStructures = data.settings?.feeStructures || [];
+
     const terms = ['T1', 'T2', 'T3'];
 
-    const student = data.students.find(s => s.id === selectedStudentId);
-    const feeStructure = student ? data.settings.feeStructures.find(f => f.grade === student.grade) : null;
+    // Find selected student - handle both string and number IDs (Google sync returns numbers)
+    const student = (data.students || []).find(s => String(s.id) === String(selectedStudentId));
+
+    // Get fee structure for student's grade, or first available structure as fallback
+    let feeStructure = student ? allFeeStructures.find(f => f.grade === student.grade) : null;
+
+    // If no specific structure, use first available - ENSURE we always have one
+    if (!feeStructure) {
+        feeStructure = allFeeStructures[0] || {
+            t1: 0, t2: 0, t3: 0,
+            admission: 0, diary: 0, development: 0,
+            boarding: 0, breakfast: 0, lunch: 0,
+            trip: 0, bookFund: 0, caution: 0,
+            uniform: 0, studentCard: 0, remedial: 0,
+            assessmentFee: 0, projectFee: 0,
+            activityFees: 0, tieAndBadge: 0,
+            academicSupport: 0, pta: 0
+        };
+    }
+
+    // Normalize selectedFees for the current student
+    const getStudentSelectedFees = (s) => {
+        if (!s) return ['t1', 't2', 't3', 'admission', 'diary', 'development', 'pta'];
+        let fees = s.selectedFees;
+        
+        if (typeof fees === 'string') {
+            const trimmed = fees.trim();
+            if (trimmed.includes(',')) {
+                fees = trimmed.split(',').map(f => f.trim()).filter(f => f);
+            } else if (trimmed) {
+                fees = [trimmed];
+            } else {
+                fees = [];
+            }
+        } else if (Array.isArray(fees) && fees.length > 0) {
+            fees = fees;
+        } else {
+            fees = ['t1', 't2', 't3', 'admission', 'diary', 'development', 'pta'];
+        }
+
+        return fees;
+    };
+
+    const studentSelectedFees = getStudentSelectedFees(student);
+
+    // Calculate total due for student based on their selected fees
+    const calculateTotalDue = () => {
+        if (!student || !feeStructure) return 0;
+
+        let total = studentSelectedFees.reduce((sum, key) => sum + (feeStructure[key] || 0), 0);
+
+        // Add arrears
+        total += Number(student.previousArrears) || 0;
+
+        return total;
+    };
+
+    const totalDue = calculateTotalDue();
+
+    // Calculate financials for display
+    const financials = student ? Storage.getStudentFinancials(student, data.payments || [], data.settings || {}) : { totalDue: 0, totalPaid: 0, balance: 0 };
 
     useEffect(() => {
         setPaymentItems({});
@@ -182,13 +244,13 @@ export const Fees = ({ data, setData }) => {
             return;
         }
 
-        const s = data.students.find(st => st.id === p.studentId);
+        const s = (data.students || []).find(st => String(st.id) === String(p.studentId));
         if (!s) return;
 
-        const financials = Storage.getStudentFinancials(s, data.payments, data.settings);
-        const fs = data.settings.feeStructures.find(f => f.grade === s.grade);
+        const financials = Storage.getStudentFinancials(s, data.payments || [], data.settings || {});
+        const fs = (data.settings?.feeStructures || []).find(f => f.grade === s.grade);
 
-        const studentPayments = (data.payments || []).filter(pay => pay.studentId === s.id);
+        const studentPayments = (data.payments || []).filter(pay => String(pay.studentId) === String(s.id));
         const paymentIndex = studentPayments.findIndex(pay => pay.id === p.id);
         const historyUpToNow = studentPayments.slice(0, paymentIndex + 1);
 
@@ -207,10 +269,10 @@ export const Fees = ({ data, setData }) => {
     };
 
     const handleVoidPayment = (paymentId) => {
-        const payment = data.payments.find(p => p.id === paymentId);
+        const payment = (data.payments || []).find(p => p.id === paymentId);
         if (!payment) return;
 
-        const student = data.students.find(s => s.id === payment.studentId);
+        const student = (data.students || []).find(s => String(s.id) === String(payment.studentId));
         const confirmMsg = `VOID PAYMENT\n\nReceipt: ${payment.receiptNo}\nStudent: ${student && student.name || 'Unknown'}\nAmount: ${data.settings.currency} ${payment.amount.toLocaleString()}\nDate: ${payment.date}\n\nAre you sure you want to CANCEL this transaction?`;
 
         if (!confirm(confirmMsg)) return;
@@ -348,7 +410,7 @@ export const Fees = ({ data, setData }) => {
             <div class="flex justify-end no-print">
                 <button 
                     onClick=${() => {
-            const student = data.students.find(s => s.id === selectedStudentId);
+            const student = (data.students || []).find(s => String(s.id) === String(selectedStudentId));
             if (student) {
                 openPromptModal(student);
             } else {
@@ -403,8 +465,8 @@ export const Fees = ({ data, setData }) => {
                 if (filterStream !== 'ALL' && s.stream !== filterStream) return false;
                 return true;
             })
-            .map(s => html`
-                                            <option value=${s.id}>${s.name} (${s.grade}${s.stream || ''})</option>
+                                    .map(s => html`
+                                            <option value=${String(s.id)}>${s.name} (${s.grade}${s.stream || ''})</option>
                                         `)}
                                 </select>
                             </div>
@@ -420,17 +482,32 @@ export const Fees = ({ data, setData }) => {
                             </div>
                         </div>
 
-                        ${feeStructure && html`
+                        ${student && feeStructure && html`
+                            <div class="bg-gradient-to-r from-blue-600 to-blue-700 p-4 rounded-xl text-white">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <p class="text-xs text-blue-200 font-bold uppercase">Total Fee Due (${selectedTerm})</p>
+                                        <p class="text-2xl font-black">${data.settings.currency} ${totalDue.toLocaleString()}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-xs text-blue-200 font-bold uppercase">Current Balance</p>
+                                        <p class="text-xl font-black ${financials.balance > 0 ? 'text-orange-300' : 'text-green-300'}">${data.settings.currency} ${financials.balance.toLocaleString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `}
+
+                        ${student && html`
                             <div class="space-y-3">
                                 <label class="text-xs font-bold text-slate-500 uppercase block">Fee Breakdown (${data.settings.currency})</label>
                                 <div class="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-2 no-scrollbar">
                                     ${feeColumns.map(col => {
-                // Handle Arrears specially
+                // Handle Arrears B/F specially
                 if (col.key === 'previousArrears') {
                     const arrearsDue = Number(student.previousArrears) || 0;
                     // Calculate actual outstanding arrears (Arrears BF - what's already been paid towards it)
                     const paidArrears = (data.payments || [])
-                        .filter(p => p.studentId === student.id)
+                        .filter(p => p.studentId === student.id && !p.voided)
                         .reduce((sum, p) => sum + (Number(p.items && p.items.previousArrears) || 0), 0);
                     const outstandingArrears = Math.max(0, arrearsDue - paidArrears);
 
@@ -445,42 +522,46 @@ export const Fees = ({ data, setData }) => {
                                                             onClick=${() => handleItemInput(col.key, outstandingArrears)}
                                                             class="text-[9px] bg-orange-600 text-white px-2 py-0.5 rounded font-bold hover:bg-orange-700 transition-colors"
                                                         >
-                                                            Pay Full Arrears
+                                                            Pay Full
                                                         </button>
                                                     </div>
-                                                    <p class="text-[10px] text-orange-500 mb-1 font-bold">Outstanding Arrears: ${data.settings.currency} ${outstandingArrears.toLocaleString()}</p>
+                                                    <p class="text-[10px] text-orange-500 mb-1 font-bold">Outstanding: ${data.settings.currency} ${outstandingArrears.toLocaleString()}</p>
                                                     <input 
                                                         type="number" 
-                                                        placeholder="Enter amount to pay towards arrears..."
+                                                        placeholder="Enter amount..."
                                                         class="w-full bg-white border border-orange-300 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-orange-500 font-black text-orange-700"
                                                         value=${paymentItems[col.key] || ''}
                                                         onInput=${(e) => handleItemInput(col.key, e.target.value)}
                                                     />
-                                                    <p class="text-[8px] text-orange-400 mt-1 italic">* It is recommended to clear arrears before current fees.</p>
                                                 </div>
                                             `;
                 }
 
-                // Term Filter logic: 
-                // 1. Hide other terms tuition
-                if (col.key === 't1' && selectedTerm !== 'T1') return null;
-                if (col.key === 't2' && selectedTerm !== 'T2') return null;
-                if (col.key === 't3' && selectedTerm !== 'T3') return null;
-
-                // Filter items based on student's fee profile
-                const isSelected = (student.selectedFees || ['t1', 't2', 't3', 'admission', 'diary', 'development']).includes(col.key);
+                // Show ALL fee items from fee structure that have amounts - always show something
                 const due = feeStructure[col.key] || 0;
+                if (due === 0) return null;
 
-                if (!isSelected || due === 0) return null;
+                // Skip non-fee columns
+                if (col.key === 'previousArrears') return null;
+
+                // Calculate how much of this fee has already been paid
+                const alreadyPaid = (data.payments || [])
+                    .filter(p => p.studentId === student.id && !p.voided)
+                    .reduce((sum, p) => sum + (Number(p.items && p.items[col.key]) || 0), 0);
+                const outstanding = Math.max(0, due - alreadyPaid);
+                const isFullyPaid = due > 0 && alreadyPaid >= due;
 
                 return html`
-                                            <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                                <p class="text-[10px] font-bold text-slate-400 uppercase truncate">${col.label}</p>
-                                                <p class="text-[10px] text-slate-500 mb-1">Due: ${due.toLocaleString()}</p>
+                                            <div class=${`p-3 rounded-xl border ${isFullyPaid ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-100'}`}>
+                                                <div class="flex justify-between items-center mb-1">
+                                                    <p class=${`text-[10px] font-bold uppercase truncate ${isFullyPaid ? 'text-green-600' : 'text-slate-500'}`}>${col.label}</p>
+                                                    ${isFullyPaid ? html`<span class="text-[8px] font-black text-green-600 bg-green-100 px-1 rounded">PAID</span>` : ''}
+                                                </div>
+                                                <p class="text-[10px] text-slate-400 mb-1">Due: ${due.toLocaleString()} | Bal: <span class=${`font-bold ${outstanding > 0 ? 'text-red-500' : 'text-green-600'}`}>${outstanding.toLocaleString()}</span></p>
                                                 <input 
                                                     type="number" 
-                                                    placeholder="0"
-                                                    class="w-full bg-white border border-slate-200 rounded-lg p-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                    placeholder=${isFullyPaid ? 'Paid' : '0'}
+                                                    class=${`w-full border rounded-lg p-1 text-sm outline-none focus:ring-1 focus:ring-blue-500 ${isFullyPaid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-slate-200'}`}
                                                     value=${paymentItems[col.key] || ''}
                                                     onInput=${(e) => handleItemInput(col.key, e.target.value)}
                                                 />
@@ -592,20 +673,17 @@ export const Fees = ({ data, setData }) => {
                                                 `;
                 }
 
-                // Filter by term if it's a tuition fee
-                const currentTermKey = (receipt.term && receipt.term.toLowerCase()) || '';
-                const isOtherTerm = ['t1', 't2', 't3'].includes(col.key) && col.key !== currentTermKey;
+                // Find the student by ID for accurate fee profile lookup
+                const receiptStudent = (data.students || []).find(s => String(s.id) === String(receipt.studentId));
+                const receiptSelectedFees = getStudentSelectedFees(receiptStudent);
 
-                // Determine if this item is part of this specific student's profile
-                const targetStudent = data.students.find(s => s.name === receipt.studentName);
-                const isSelected = ((targetStudent && targetStudent.selectedFees) || ['t1', 't2', 't3']).includes(col.key);
+                // Only show fees the student registered for (or anything that was paid)
+                const isRegistered = receiptSelectedFees.includes(col.key);
+                if (!isRegistered && paidNow === 0) return null;
 
-                // Don't show other terms unless there was a payment for them (rare)
-                if (isOtherTerm && paidNow === 0) return null;
+                const feeAmount = isRegistered ? ((receipt.structure && receipt.structure[col.key]) || 0) : 0;
 
-                const feeAmount = isSelected ? ((receipt.structure && receipt.structure[col.key]) || 0) : 0;
-
-                // Only show if it's selected for the student OR if something was paid anyway (history)
+                // Skip if nothing due and nothing paid
                 if (feeAmount === 0 && paidNow === 0) return null;
 
                 // Calculate cumulative balance for this item up to this receipt
@@ -765,7 +843,7 @@ export const Fees = ({ data, setData }) => {
             .filter(p => {
                 // Filter by grade
                 if (filterGrade !== 'ALL') {
-                    const s = data.students.find(st => st.id === p.studentId);
+                const s = (data.students || []).find(st => String(st.id) === String(p.studentId));
                     if ((s && s.grade) !== filterGrade) return false;
                 }
                 // Filter by voided status
@@ -774,7 +852,7 @@ export const Fees = ({ data, setData }) => {
                 return true;
             })
             .slice().reverse().map(p => {
-                const s = data.students.find(st => st.id === p.studentId);
+                const s = (data.students || []).find(st => String(st.id) === String(p.studentId));
                 return html`
                                     <tr key=${p.id} class=${p.voided ? 'bg-red-50' : 'hover:bg-slate-50'}>
                                         <td class="px-6 py-4 font-mono text-xs">${p.receiptNo}</td>

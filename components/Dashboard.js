@@ -1,14 +1,54 @@
 import { h } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
-export const Dashboard = ({ data }) => {
+export const Dashboard = ({ data, googleSyncStatus }) => {
     const students = data?.students || [];
+    console.log('📲 Dashboard rendering, students:', students.length, 'sync status:', googleSyncStatus);
     const payments = data?.payments || [];
     const assessments = data?.assessments || [];
     const settings = data?.settings || { currency: 'KES.', grades: [], feeStructures: [] };
+    
+    const [activeUsers, setActiveUsers] = useState([]);
+    const [lastActivity, setLastActivity] = useState(null);
+
+    // Check for active users periodically
+    useEffect(() => {
+        if (!settings.googleScriptUrl) {
+            console.log('⏭️ No Google Sheet URL configured');
+            return;
+        }
+        
+        const checkActiveUsers = async () => {
+            try {
+                googleSheetSync.setSettings(settings);
+                const result = await googleSheetSync.getActiveUsers();
+                console.log('📊 Active users check result:', result);
+                
+                if (result.success) {
+                    setActiveUsers(result.activeUsers || []);
+                    if (result.lastActivity) {
+                        setLastActivity(new Date(parseInt(result.lastActivity)));
+                    }
+                    console.log('✅ Active users updated:', result.activeUsers?.length);
+                } else {
+                    console.warn('⚠️ Failed to fetch active users:', result);
+                }
+            } catch (error) {
+                console.error('❌ Error checking active users:', error);
+            }
+        };
+        
+        // Check immediately and then every 30 seconds
+        checkActiveUsers();
+        const interval = setInterval(checkActiveUsers, 30000);
+        
+        return () => clearInterval(interval);
+    }, [settings.googleScriptUrl]);
 
     const totalStudents = students.length;
     const totalTeachers = (data?.teachers || []).length;
@@ -32,6 +72,57 @@ export const Dashboard = ({ data }) => {
 
     return html`
         <div class="space-y-8 animate-in fade-in duration-500">
+            <!-- Sync Status Banner -->
+            ${googleSyncStatus && html`
+                <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-2 rounded-xl shadow-lg shadow-blue-200 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="animate-pulse">🔄</span>
+                        <span class="font-bold text-sm">${googleSyncStatus}</span>
+                    </div>
+                </div>
+            `}
+            ${settings.googleScriptUrl && html`
+                <div class="bg-gradient-to-r from-green-600 to-green-700 text-white px-4 py-3 rounded-xl shadow-lg shadow-green-200">
+                    <div class="flex items-center gap-3 mb-3">
+                        <span class="text-2xl">📊</span>
+                        <div>
+                            <p class="font-bold">Google Sheet Connected</p>
+                            <p class="text-xs text-green-100">Real-time data sync enabled</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Active Users Display -->
+                    ${activeUsers.length > 0 ? html`
+                        <div class="mt-4 pt-4 border-t border-white/20">
+                            <p class="text-xs font-bold uppercase text-green-100 mb-3">👥 Online Users (${activeUsers.length})</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                ${activeUsers.map(user => {
+                                    const lastTime = new Date(user.lastActivity);
+                                    const role = user.device.includes('admin@') ? '👨‍💼 Admin' : '👨‍🏫 Teacher';
+                                    const username = user.device.split('@')[1]?.split('-')[0] || 'Unknown';
+                                    return html`
+                                        <div class="bg-white/10 backdrop-blur rounded-lg p-3 flex items-center gap-3">
+                                            <div class="flex-1 min-w-0">
+                                                <p class="text-sm font-bold truncate">${role}</p>
+                                                <p class="text-xs text-green-100 truncate">${username}</p>
+                                                <p class="text-[10px] text-green-200 mt-1">Active: ${lastTime.toLocaleTimeString()}</p>
+                                            </div>
+                                            <div class="flex-shrink-0">
+                                                <span class="inline-flex h-3 w-3 rounded-full bg-green-300 animate-pulse"></span>
+                                            </div>
+                                        </div>
+                                    `;
+                                })}
+                            </div>
+                        </div>
+                    ` : html`
+                        <div class="mt-4 pt-4 border-t border-white/20">
+                            <p class="text-xs text-green-100">No users currently active. Last activity: ${lastActivity ? lastActivity.toLocaleTimeString() : 'N/A'}</p>
+                        </div>
+                    `}
+                </div>
+            `}
+
             <div class="no-print">
                 <h1 class="text-3xl font-extrabold tracking-tight">System Overview</h1>
                 <p class="text-slate-500 mt-1">Welcome back to ${settings.schoolName || 'the portal'}.</p>
@@ -55,7 +146,7 @@ export const Dashboard = ({ data }) => {
                     </h3>
                     <div class="space-y-1">
                         ${payments.slice(-5).reverse().map((p, idx) => {
-        const student = students.find(s => s.id === p.studentId);
+        const student = (students || []).find(s => String(s.id) === String(p.studentId));
         return html`
                                 <div class=${`flex justify-between items-center p-3 rounded-xl border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-slate-50/50' : ''}`}>
                                     <div>

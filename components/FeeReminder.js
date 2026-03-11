@@ -41,7 +41,13 @@ export const FeeReminder = ({ data }) => {
         const feeStructure = settings.feeStructures?.find(f => f.grade === student.grade);
         if (!feeStructure) return { items: [], totalDue: 0, totalPaid: 0, balance: 0, currentYearPaid: 0 };
 
-        const selectedKeys = student.selectedFees || ['t1', 't2', 't3'];
+        // Normalize selectedFees in case it's a string from Google Sheets
+        let selectedKeys = student.selectedFees;
+        if (typeof selectedKeys === 'string') {
+            selectedKeys = selectedKeys.split(',').map(f => f.trim()).filter(f => f);
+        } else if (!Array.isArray(selectedKeys)) {
+            selectedKeys = ['t1', 't2', 't3'];
+        }
         
         const itemized = feeColumns
             .filter(col => selectedKeys.includes(col.key))

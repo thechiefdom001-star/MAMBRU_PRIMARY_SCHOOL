@@ -321,7 +321,7 @@ export const Library = ({ data, setData }) => {
                             <tbody class="divide-y divide-slate-50">
                                 ${library.transactions.slice().reverse().map(t => {
                                     const book = library.books.find(b => b.id === t.bookId);
-                                    const student = students.find(s => s.id === t.studentId);
+                                    const student = (students || []).find(s => String(s.id) === String(t.studentId));
                                     return html`
                                         <tr key=${t.id} class="hover:bg-slate-50 text-sm">
                                             <td class="px-6 py-4">

@@ -42,15 +42,18 @@ export const Assessments = ({ data, setData }) => {
     });
 
     const updateAssessment = (studentId, field, value) => {
+        const studentIdStr = String(studentId);
+        const academicYear = data.settings?.academicYear || '2025/2026';
+        
         const existing = data.assessments.find(a => 
-            a.studentId === studentId && 
+            String(a.studentId) === studentIdStr && 
             a.subject === selectedSubject && 
             a.term === selectedTerm && 
             a.examType === selectedExamType &&
-            a.academicYear === data.settings.academicYear
+            a.academicYear === academicYear
         );
         const otherAssessments = data.assessments.filter(a => 
-            !(a.studentId === studentId && a.subject === selectedSubject && a.term === selectedTerm && a.examType === selectedExamType && a.academicYear === data.settings.academicYear)
+            !(String(a.studentId) === studentIdStr && a.subject === selectedSubject && a.term === selectedTerm && a.examType === selectedExamType && a.academicYear === academicYear)
         );
         
         let level = existing?.level || 'ME2';
@@ -65,13 +68,13 @@ export const Assessments = ({ data, setData }) => {
 
         const newAssessment = {
             id: existing?.id || ('A-' + Date.now() + Math.random().toString().slice(2, 6)),
-            studentId,
+            studentId: studentIdStr,
             subject: selectedSubject,
             term: selectedTerm,
             examType: selectedExamType,
             level,
             score,
-            academicYear: data.settings.academicYear,
+            academicYear: academicYear,
             date: new Date().toISOString().split('T')[0]
         };
         setData({ ...data, assessments: [...otherAssessments, newAssessment] });
@@ -90,15 +93,39 @@ export const Assessments = ({ data, setData }) => {
         googleSheetSync.setSettings(data.settings);
         
         try {
+            const updatedAssessments = [];
+            
             for (const assessment of assessments) {
                 // Get student info for the record
-                const student = data.students.find(s => s.id === assessment.studentId);
-                await googleSheetSync.pushAssessment({
+                const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+                const result = await googleSheetSync.pushAssessment({
                     ...assessment,
                     studentName: student?.name || 'Unknown',
                     grade: student?.grade || ''
                 });
+                
+                if (result.success) {
+                    // Merge any updates from Google back into the assessment
+                    const updatedAssessment = { ...assessment, ...result.updatedData };
+                    updatedAssessments.push(updatedAssessment);
+                } else {
+                    // Keep original assessment if sync failed
+                    updatedAssessments.push(assessment);
+                }
             }
+            
+            // Update local data with any changes from Google
+            if (updatedAssessments.length > 0) {
+                const currentAssessments = [...data.assessments];
+                updatedAssessments.forEach(updated => {
+                    const idx = currentAssessments.findIndex(a => a.id === updated.id);
+                    if (idx >= 0) {
+                        currentAssessments[idx] = updated;
+                    }
+                });
+                setData({ ...data, assessments: currentAssessments });
+            }
+            
             setSyncStatus('✓ Synced!');
             setTimeout(() => setSyncStatus(''), 2000);
         } catch (error) {
@@ -243,7 +270,7 @@ export const Assessments = ({ data, setData }) => {
                     <div class="divide-y divide-slate-50">
                         ${students.map(student => {
                             const assessment = data.assessments.find(a => 
-                                a.studentId === student.id && 
+                                String(a.studentId) === String(student.id) && 
                                 a.subject === selectedSubject && 
                                 a.term === selectedTerm && 
                                 a.examType === selectedExamType

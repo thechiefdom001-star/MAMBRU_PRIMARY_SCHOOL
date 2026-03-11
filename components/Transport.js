@@ -177,7 +177,7 @@ export const Transport = ({ data, setData }) => {
                     </thead>
                     <tbody class="divide-y divide-slate-50">
                         ${transport.assignments.map(a => {
-                            const student = data.students.find(s => s.id === a.studentId);
+                            const student = (data.students || []).find(s => String(s.id) === String(a.studentId));
                             const route = transport.routes.find(r => r.id === a.routeId);
                             return html`
                                 <tr class="hover:bg-slate-100 even:bg-slate-50">

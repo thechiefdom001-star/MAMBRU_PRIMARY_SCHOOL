@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 

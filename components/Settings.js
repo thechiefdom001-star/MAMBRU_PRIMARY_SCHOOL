@@ -30,8 +30,23 @@ export const Settings = ({ data, setData }) => {
     const [localSettings, setLocalSettings] = useState(data.settings);
     useEffect(() => {
         setLocalSettings(data.settings || {});
+        // Initialize hiddenFeeItems from saved settings
+        setHiddenFeeItems(data.settings?.hiddenFeeItems || {});
     }, [data.settings]);
     const settings = localSettings;
+
+    // Save hiddenFeeItems to settings when it changes
+    useEffect(() => {
+        if (Object.keys(hiddenFeeItems).length > 0) {
+            setData({
+                ...data,
+                settings: {
+                    ...data.settings,
+                    hiddenFeeItems
+                }
+            });
+        }
+    }, [hiddenFeeItems]);
 
     const updateFee = (grade, field, val) => {
         const newStructures = (settings.feeStructures || []).map(f => 
