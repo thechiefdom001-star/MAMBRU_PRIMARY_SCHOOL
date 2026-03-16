@@ -1,12 +1,16 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
+import { Pagination } from '../lib/pagination.js';
+import { PaginationControls } from './Pagination.js';
 
 const html = htm.bind(h);
 
 export const Staff = ({ data, setData }) => {
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const [newStaff, setNewStaff] = useState({ 
         name: '', 
         role: '', 
@@ -57,6 +61,18 @@ export const Staff = ({ data, setData }) => {
     };
 
     const staffList = data.staff || [];
+
+    // Pagination
+    const handlePageChange = (newPage, newItemsPerPage) => {
+        if (newItemsPerPage) {
+            setItemsPerPage(newItemsPerPage);
+            setCurrentPage(1);
+        } else {
+            setCurrentPage(newPage);
+        }
+    };
+
+    const paginatedStaff = Pagination.getPageItems(staffList, currentPage, itemsPerPage);
 
     return html`
         <div class="space-y-6">
@@ -125,6 +141,12 @@ export const Staff = ({ data, setData }) => {
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-50">
+                        ${paginatedStaff.map(s => html`
+                            <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                        `)}
+                    </tbody>
+                    <!-- Print view: All staff (hidden on screen, visible in print) -->
+                    <tbody class="divide-y divide-slate-50 hidden print:block">
                         ${staffList.map(s => html`
                             <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
                                 <td class="px-6 py-4">
@@ -146,6 +168,14 @@ export const Staff = ({ data, setData }) => {
                         ${staffList.length === 0 && html`<tr><td colspan="4" class="p-12 text-center text-slate-300">No support staff registered yet.</td></tr>`}
                     </tbody>
                 </table>
+                ${staffList.length > 0 && html`
+                    ${h(PaginationControls, {
+                        currentPage,
+                        onPageChange: handlePageChange,
+                        totalItems: staffList.length,
+                        itemsPerPage
+                    })}
+                `}
             </div>
         </div>
     `;

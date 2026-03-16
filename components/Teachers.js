@@ -1,6 +1,8 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
+import { Pagination } from '../lib/pagination.js';
+import { PaginationControls } from './Pagination.js';
 
 const html = htm.bind(h);
 
@@ -16,6 +18,8 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
     
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const [newTeacher, setNewTeacher] = useState({ 
         name: '', 
         contact: '', 
@@ -82,6 +86,18 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
     };
 
     const teachers = teachersList;
+
+    // Pagination
+    const handlePageChange = (newPage, newItemsPerPage) => {
+        if (newItemsPerPage) {
+            setItemsPerPage(newItemsPerPage);
+            setCurrentPage(1);
+        } else {
+            setCurrentPage(newPage);
+        }
+    };
+
+    const paginatedTeachers = Pagination.getPageItems(teachers, currentPage, itemsPerPage);
 
     return html`
         <div class="space-y-6">
@@ -205,6 +221,12 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-50">
+                            ${paginatedTeachers.map(t => html`
+                                <tr key=${t.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                            `)}
+                        </tbody>
+                        <!-- Print view: All teachers (hidden on screen, visible in print) -->
+                        <tbody class="divide-y divide-slate-50 hidden print:block">
                             ${teachers.map(t => html`
                                 <tr key=${t.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
                                     <td class="px-6 py-4">
@@ -244,6 +266,14 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
                             ${teachers.length === 0 && html`<tr><td colspan="4" class="p-12 text-center text-slate-300">No teachers registered yet.</td></tr>`}
                         </tbody>
                     </table>
+                    ${teachers.length > 0 && html`
+                        ${h(PaginationControls, {
+                            currentPage,
+                            onPageChange: handlePageChange,
+                            totalItems: teachers.length,
+                            itemsPerPage
+                        })}
+                    `}
                 </div>
 
                 <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm no-print">

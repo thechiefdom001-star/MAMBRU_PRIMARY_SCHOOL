@@ -234,11 +234,15 @@ function doPost(e) {
   let data = {};
   
   try {
+    // Get action from URL parameters first
+    const urlAction = e.parameter.action;
+    
     // Handle both JSON body and form data
     if (e.postData && e.postData.contents) {
       try {
         data = JSON.parse(e.postData.contents);
       } catch (parseErr) {
+        console.log('Failed to parse body as JSON:', parseErr.message);
         // Try parsing as form data
         const params = e.parameter;
         data = {
@@ -250,12 +254,18 @@ function doPost(e) {
       }
     } else if (e.parameter) {
       // Fallback to parameters
+      const params = e.parameter;
       data = {
-        action: e.parameter.action,
-        sheetName: e.parameter.sheetName,
-        records: e.parameter.records ? JSON.parse(e.parameter.records) : [],
-        headers: e.parameter.headers ? JSON.parse(e.parameter.headers) : []
+        action: params.action,
+        sheetName: params.sheetName,
+        records: params.records ? JSON.parse(params.records) : [],
+        headers: params.headers ? JSON.parse(params.headers) : []
       };
+    }
+    
+    // Ensure action is set from URL
+    if (urlAction && !data.action) {
+      data.action = urlAction;
     }
     
     const action = data.action || 'unknown';
@@ -333,6 +343,18 @@ function doPost(e) {
         
       case 'deleteStudent':
         response = deleteRecord(SHEET_NAMES.STUDENTS, 'id', data.recordId, STUDENT_HEADERS);
+        break;
+        
+      case 'bulkPushStudents':
+        response = bulkPushRecords(SHEET_NAMES.STUDENTS, data.students || [], STUDENT_HEADERS);
+        break;
+        
+      case 'bulkPushAssessments':
+        response = bulkPushRecords(SHEET_NAMES.ASSESSMENTS, data.assessments || [], ASSESSMENT_HEADERS);
+        break;
+        
+      case 'bulkPushAttendance':
+        response = bulkPushRecords(SHEET_NAMES.ATTENDANCE, data.attendance || [], ATTENDANCE_HEADERS);
         break;
         
       case 'setActive':

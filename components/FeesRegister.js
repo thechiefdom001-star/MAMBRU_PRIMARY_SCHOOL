@@ -2,6 +2,8 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { Pagination } from '../lib/pagination.js';
+import { PaginationControls } from './Pagination.js';
 
 const html = htm.bind(h);
 
@@ -10,6 +12,8 @@ export const FeesRegister = ({ data }) => {
     const [filterTerm, setFilterTerm] = useState('ALL');
     const [filterName, setFilterName] = useState('');
     const [showOnlyArrears, setShowOnlyArrears] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
 
     const students = data.students || [];
     const payments = data.payments || [];
@@ -96,6 +100,18 @@ export const FeesRegister = ({ data }) => {
         return matchGrade && matchName && matchArrears;
     });
 
+    // Pagination
+    const handlePageChange = (newPage, newItemsPerPage) => {
+        if (newItemsPerPage) {
+            setItemsPerPage(newItemsPerPage);
+            setCurrentPage(1);
+        } else {
+            setCurrentPage(newPage);
+        }
+    };
+
+    const paginatedData = Pagination.getPageItems(filteredData, currentPage, itemsPerPage);
+
     return html`
         <div class="space-y-6">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -173,6 +189,12 @@ export const FeesRegister = ({ data }) => {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-50">
+                            ${paginatedData.map(s => html`
+                                <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                            `)}
+                        </tbody>
+                        <!-- Print view: All records (hidden on screen, visible in print) -->
+                        <tbody class="divide-y divide-slate-50 hidden print:block">
                             ${filteredData.map(s => html`
                                 <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
                                     <td class="px-6 py-4">
@@ -207,6 +229,14 @@ export const FeesRegister = ({ data }) => {
                             </tfoot>
                         `}
                     </table>
+                    ${filteredData.length > 0 && html`
+                        ${h(PaginationControls, {
+                            currentPage,
+                            onPageChange: handlePageChange,
+                            totalItems: filteredData.length,
+                            itemsPerPage
+                        })}
+                    `}
             </div>
         </div>
     `;

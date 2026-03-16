@@ -8,38 +8,30 @@ const html = htm.bind(h);
 
 export const Dashboard = ({ data, googleSyncStatus }) => {
     const students = data?.students || [];
-    console.log('📲 Dashboard rendering, students:', students.length, 'sync status:', googleSyncStatus);
     const payments = data?.payments || [];
     const assessments = data?.assessments || [];
     const settings = data?.settings || { currency: 'KES.', grades: [], feeStructures: [] };
     
-    const [activeUsers, setActiveUsers] = useState([]);
+    const [activeUsers, setActiveUsers] = useState(0);
     const [lastActivity, setLastActivity] = useState(null);
 
     // Check for active users periodically
     useEffect(() => {
-        if (!settings.googleScriptUrl) {
-            console.log('⏭️ No Google Sheet URL configured');
-            return;
-        }
+        if (!settings.googleScriptUrl) return;
         
         const checkActiveUsers = async () => {
             try {
                 googleSheetSync.setSettings(settings);
                 const result = await googleSheetSync.getActiveUsers();
-                console.log('📊 Active users check result:', result);
                 
                 if (result.success) {
-                    setActiveUsers(result.activeUsers || []);
+                    setActiveUsers(result.activeUsers?.length || 0);
                     if (result.lastActivity) {
                         setLastActivity(new Date(parseInt(result.lastActivity)));
                     }
-                    console.log('✅ Active users updated:', result.activeUsers?.length);
-                } else {
-                    console.warn('⚠️ Failed to fetch active users:', result);
                 }
             } catch (error) {
-                console.error('❌ Error checking active users:', error);
+                console.warn('Error checking active users:', error);
             }
         };
         

@@ -220,6 +220,35 @@
                 print-color-adjust: exact !important;
             }
 
+            /* ==============================
+               PRINT COMPLETE TABLE FIX:
+               Screen-only tbody rows are hidden on print;
+               Print-only tbody rows are shown on print.
+               This ensures ALL data prints regardless of pagination.
+               ============================== */
+
+            /* Hide screen pagination rows during print */
+            .students-print-table tbody.marklist-screen-rows,
+            tbody.marklist-screen-rows {
+                display: none !important;
+            }
+
+            /* Show full-data print tbodys during print */
+            .students-print-table tbody.students-print-rows,
+            tbody.marklist-print-rows {
+                display: table-row-group !important;
+            }
+
+            /* Also hide the first (paginated) tbody of students-print-table on print */
+            .students-print-table tbody:not(.students-print-rows) {
+                display: none !important;
+            }
+
+            /* Hide pagination controls */
+            .no-print {
+                display: none !important;
+            }
+
             body.print-receipt-only .print-section-table {
                 display: none !important;
             }
