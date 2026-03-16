@@ -140,18 +140,12 @@ export const Staff = ({ data, setData }) => {
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase no-print">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-50">
+                    <tbody class="divide-y divide-slate-50 staff-screen-rows">
                         ${paginatedStaff.map(s => html`
-                            <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
-                        `)}
-                    </tbody>
-                    <!-- Print view: All staff (hidden on screen, visible in print) -->
-                    <tbody class="divide-y divide-slate-50 hidden print:block">
-                        ${staffList.map(s => html`
                             <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
                                 <td class="px-6 py-4">
                                     <div class="font-bold text-sm">${s.name}</div>
-                                    <div class="text-[10px] text-slate-400 uppercase font-medium">ID: ${s.id}</div>
+                                    <div class="text-[10px] text-slate-400 uppercase font-medium">ID: ${s.employeeNo || s.id}</div>
                                 </td>
                                 <td class="px-6 py-4">
                                     <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase">${s.role}</span>
@@ -165,7 +159,28 @@ export const Staff = ({ data, setData }) => {
                                 </td>
                             </tr>
                         `)}
-                        ${staffList.length === 0 && html`<tr><td colspan="4" class="p-12 text-center text-slate-300">No support staff registered yet.</td></tr>`}
+                        ${staffList.length === 0 ? html`<tr><td colspan="4" class="p-12 text-center text-slate-300">No support staff registered yet.</td></tr>` : ''}
+                    </tbody>
+                    <!-- Print view: All staff (hidden on screen, visible in print) -->
+                    <tbody class="divide-y divide-slate-50 staff-print-rows" style="display:none">
+                        ${staffList.map(s => html`
+                            <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                                <td class="px-6 py-4">
+                                    <div class="font-bold text-sm">${s.name}</div>
+                                    <div class="text-[10px] text-slate-400 uppercase font-medium">ID: ${s.employeeNo || s.id}</div>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase">${s.role}</span>
+                                </td>
+                                <td class="px-6 py-4 text-slate-600 text-sm font-medium">${s.contact || 'N/A'}</td>
+                                <td class="px-6 py-4 no-print">
+                                    <div class="flex gap-2">
+                                        <button onClick=${() => handleEdit(s)} class="text-blue-600 text-[10px] font-bold uppercase hover:underline">Edit</button>
+                                        <button onClick=${() => handleDelete(s.id)} class="text-red-500 text-[10px] font-bold uppercase hover:underline">Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `)}
                     </tbody>
                 </table>
                 ${staffList.length > 0 && html`
