@@ -249,6 +249,47 @@
                 display: none !important;
             }
 
+            /* Professional styling for printed student tables */
+            .students-print-table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                border-radius: 0 !important;
+                break-inside: auto; /* Allow table to split across pages */
+            }
+            .students-print-table thead {
+                display: table-header-group; /* Repeats header on every printed page */
+            }
+            .students-print-table tr {
+                break-inside: avoid; /* Prevent row splitting across pages */
+                page-break-inside: avoid;
+            }
+            .students-print-table th,
+            .students-print-table td {
+                border: 1px solid #cbd5e1 !important;
+                padding: 6px 8px !important;
+                font-size: 11px !important;
+                color: #0f172a !important;
+            }
+            .students-print-table th {
+                background-color: #f1f5f9 !important;
+                font-weight: 800 !important;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                text-align: left;
+            }
+            /* Subtle striped rows for print readability */
+            .students-print-table tbody.students-print-rows tr:nth-child(even) td {
+                background-color: #f8fafc !important;
+            }
+            /* Clean up UI badges intended for screen */
+            .students-print-table td .bg-slate-200,
+            .students-print-table td .rounded,
+            .students-print-table td .bg-blue-50 {
+                background-color: transparent !important;
+                border: none !important;
+                padding: 0 !important;
+            }
+
             body.print-receipt-only .print-section-table {
                 display: none !important;
             }
