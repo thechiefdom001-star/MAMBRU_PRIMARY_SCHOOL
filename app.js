@@ -193,10 +193,35 @@ const App = () => {
         const assessmentsToSync = [];
         const attendanceToSync = [];
 
+        const isStudentEqual = (local, remote) => {
+            if (!remote) return false;
+            if (local.name !== remote.name) return false;
+            if (local.grade !== remote.grade) return false;
+            if (local.stream !== remote.stream) return false;
+            if (local.parentContact !== remote.parentContact) return false;
+            if (String(local.previousArrears || '0') !== String(remote.previousArrears || '0')) return false;
+            
+            const localFees = (local.selectedFees || []).slice().sort().join(',');
+            const remoteFees = (remote.selectedFees || []).slice().sort().join(',');
+            if (localFees !== remoteFees) return false;
+            
+            return true;
+        };
+
+        const isAssessmentEqual = (local, remote) => {
+            if (!remote) return false;
+            return String(local.score) === String(remote.score) && String(local.level) === String(remote.level);
+        };
+
+        const isAttendanceEqual = (local, remote) => {
+            if (!remote) return false;
+            return String(local.status) === String(remote.status);
+        };
+
         for (const s of (data.students || [])) {
             const admNo = s.admissionNo?.trim() || '';
             const remote = sheetMap.get(admNo);
-            if (!remote || JSON.stringify(s) !== JSON.stringify({...remote, id: s.id})) {
+            if (!isStudentEqual(s, remote)) {
                 studentsToSync.push(s);
             }
         }
@@ -204,7 +229,7 @@ const App = () => {
         for (const a of (data.assessments || [])) {
             const key = `${a.studentId}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`;
             const remote = assessMap.get(key);
-            if (!remote || JSON.stringify(a) !== JSON.stringify(remote)) {
+            if (!isAssessmentEqual(a, remote)) {
                 assessmentsToSync.push(a);
             }
         }
@@ -212,7 +237,7 @@ const App = () => {
         for (const a of (data.attendance || [])) {
             const key = `${a.studentId}-${a.date}`;
             const remote = attMap.get(key);
-            if (!remote || JSON.stringify(a) !== JSON.stringify(remote)) {
+            if (!isAttendanceEqual(a, remote)) {
                 attendanceToSync.push(a);
             }
         }
