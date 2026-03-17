@@ -83,16 +83,17 @@ export const Students = ({ data, setData, onSelectStudent }) => {
             setData({ ...data, students: updated });
             setEditingId(null);
 
-            // also sync update to Google
+            // Sync update to Google Sheet (update in-place, not add new row)
             if (data.settings.googleScriptUrl) {
-                setSyncStatus('Updating Google...');
+                setSyncStatus('Updating Google Sheet...');
                 googleSheetSync.setSettings(data.settings);
-                const resp = await googleSheetSync.pushStudent(filteredStudent);
+                const resp = await googleSheetSync.updateRecord('Students', filteredStudent);
                 if (!resp.success) {
-                    console.warn('Failed to update student on Google:', resp.error);
+                    // Fallback: push as new record if updateRecord fails (e.g. row not found)
+                    await googleSheetSync.pushStudent(filteredStudent);
                 }
-                setSyncStatus('✓ Synced!');
-                setTimeout(() => setSyncStatus(''), 2000);
+                setSyncStatus('✓ Updated in Sheet!');
+                setTimeout(() => setSyncStatus(''), 2500);
             }
         } else {
             const id = Date.now().toString();
@@ -171,9 +172,22 @@ export const Students = ({ data, setData, onSelectStudent }) => {
         alert(`${student.name} promoted to ${nextGrade}. Arrears: ${data.settings.currency} ${financials.balance.toLocaleString()}`);
     };
 
-    const handleDelete = (id) => {
-        if (confirm('Are you sure you want to delete this student? This will not remove their payment history but they will no longer appear in active lists.')) {
-            setData({ ...data, students: data.students.filter(s => s.id !== id) });
+    const handleDelete = async (id) => {
+        const student = data.students.find(s => s.id === id);
+        if (!student) return;
+
+        if (!confirm(`Delete ${student.name}? This student and their assessments will be removed from local data. This action also removes them from the Google Sheet if connected.`)) return;
+
+        // Remove locally
+        setData({ ...data, students: data.students.filter(s => s.id !== id) });
+
+        // Delete from Google Sheet
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus('Deleting from Sheet...');
+            googleSheetSync.setSettings(data.settings);
+            const resp = await googleSheetSync.deleteStudent(id);
+            setSyncStatus(resp.success ? '✓ Deleted from Sheet!' : '⚠ Local deleted, Sheet sync pending');
+            setTimeout(() => setSyncStatus(''), 3000);
         }
     };
 

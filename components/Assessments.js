@@ -96,25 +96,35 @@ export const Assessments = ({ data, setData }) => {
             const updatedAssessments = [];
             
             for (const assessment of assessments) {
-                // Get student info for the record
                 const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
-                const result = await googleSheetSync.pushAssessment({
+                const enriched = {
                     ...assessment,
                     studentName: student?.name || 'Unknown',
                     grade: student?.grade || ''
-                });
+                };
+                
+                // Use updateRecord for existing assessments, pushAssessment for new ones
+                // The assessment already has an `id`; updateRecord will find and update its row.
+                let result;
+                if (assessment.id) {
+                    result = await googleSheetSync.updateRecord('Assessments', enriched);
+                    if (!result.success) {
+                        // Fallback to push (new row) if record not found on sheet yet
+                        result = await googleSheetSync.pushAssessment(enriched);
+                    }
+                } else {
+                    result = await googleSheetSync.pushAssessment(enriched);
+                }
                 
                 if (result.success) {
-                    // Merge any updates from Google back into the assessment
-                    const updatedAssessment = { ...assessment, ...result.updatedData };
+                    const updatedAssessment = { ...assessment, ...(result.updatedData || {}) };
                     updatedAssessments.push(updatedAssessment);
                 } else {
-                    // Keep original assessment if sync failed
                     updatedAssessments.push(assessment);
                 }
             }
             
-            // Update local data with any changes from Google
+            // Merge back any changes returned from Google
             if (updatedAssessments.length > 0) {
                 const currentAssessments = [...data.assessments];
                 updatedAssessments.forEach(updated => {
@@ -143,13 +153,13 @@ export const Assessments = ({ data, setData }) => {
         const updatedAssessments = data.assessments.filter(a => a.id !== assessmentId);
         setData({ ...data, assessments: updatedAssessments });
         
-        // Sync deletion to Google Sheet
+        // Delete from Google Sheet
         if (data.settings.googleScriptUrl) {
-            setSyncStatus('Syncing delete...');
+            setSyncStatus('Deleting from Sheet...');
             googleSheetSync.setSettings(data.settings);
-            await googleSheetSync.deleteAssessment(assessmentId);
-            setSyncStatus('✓ Deleted from Google!');
-            setTimeout(() => setSyncStatus(''), 2000);
+            const resp = await googleSheetSync.deleteAssessment(assessmentId);
+            setSyncStatus(resp.success ? '✓ Deleted from Sheet!' : '⚠ Local deleted, Sheet sync pending');
+            setTimeout(() => setSyncStatus(''), 2500);
         }
     };
     

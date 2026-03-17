@@ -177,7 +177,7 @@ const App = () => {
         const sheetStudents = sheetData.students || [];
         const sheetMap = new Map(sheetStudents.map(s => {
             const cleaned = { ...s, selectedFees: Storage.parseSelectedFees(s.selectedFees) };
-            return [s.admissionNo?.trim() || '', cleaned];
+            return [(s.admissionNo ? String(s.admissionNo).trim() : ''), cleaned];
         }));
         
         const sheetAssess = sheetData.assessments || [];
@@ -219,7 +219,7 @@ const App = () => {
         };
 
         for (const s of (data.students || [])) {
-            const admNo = s.admissionNo?.trim() || '';
+            const admNo = s.admissionNo ? String(s.admissionNo).trim() : '';
             const remote = sheetMap.get(admNo);
             if (!isStudentEqual(s, remote)) {
                 studentsToSync.push(s);

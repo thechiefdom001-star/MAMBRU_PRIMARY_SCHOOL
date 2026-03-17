@@ -62,6 +62,26 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
     });
     const maxGradeFee = Math.max(...feesPerGrade.map(f => f.total), 1);
 
+    const assessmentActivity = (settings.grades || []).map(grade => {
+        const gradeStudents = students.filter(s => s.grade === grade);
+        const totalEnrolled = gradeStudents.length;
+        
+        const gradeStudentIds = new Set(gradeStudents.map(s => String(s.id)));
+        const assessedStudentIds = new Set(
+            assessments.filter(a => gradeStudentIds.has(String(a.studentId))).map(a => String(a.studentId))
+        );
+        
+        const studentsAssessed = assessedStudentIds.size;
+        const percentage = totalEnrolled > 0 ? (studentsAssessed / totalEnrolled) * 100 : 0;
+        
+        return {
+            grade,
+            totalEnrolled,
+            studentsAssessed,
+            percentage
+        };
+    });
+
     return html`
         <div class="space-y-8 animate-in fade-in duration-500">
             <!-- Sync Status Banner -->
@@ -246,6 +266,46 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
                         </div>
                     </div>
                     ${totalFeesCollected === 0 && html`<p class="text-center text-slate-300 py-12 text-sm">No fee collection data yet</p>`}
+                </div>
+                
+                <!-- Assessment Activity Component -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2">
+                    <h3 class="font-bold mb-6 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-purple-500 rounded-full"></span>
+                        Assessment Activity
+                    </h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                        ${assessmentActivity.map(item => {
+                            let colorTheme = { bg: 'bg-red-100', text: 'text-red-700', bar: 'bg-red-500' };
+                            if (item.percentage === 100) colorTheme = { bg: 'bg-green-100', text: 'text-green-700', bar: 'bg-green-500' };
+                            else if (item.percentage >= 75) colorTheme = { bg: 'bg-purple-100', text: 'text-purple-700', bar: 'bg-purple-500' };
+                            else if (item.percentage >= 50) colorTheme = { bg: 'bg-blue-100', text: 'text-blue-700', bar: 'bg-blue-500' };
+                            else if (item.percentage >= 25) colorTheme = { bg: 'bg-orange-100', text: 'text-orange-700', bar: 'bg-orange-500' };
+                            else if (item.percentage > 0) colorTheme = { bg: 'bg-rose-100', text: 'text-rose-700', bar: 'bg-rose-500' };
+                            else colorTheme = { bg: 'bg-slate-200', text: 'text-slate-600', bar: 'bg-slate-300' };
+                            
+                            return html`
+                            <div class="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="font-bold text-slate-700 text-sm truncate pr-2">${item.grade}</span>
+                                    <span class=${`flex-shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${colorTheme.bg} ${colorTheme.text}`}>
+                                        ${item.percentage.toFixed(0)}%
+                                    </span>
+                                </div>
+                                <div class="w-full bg-slate-200 rounded-full h-2 mb-3 overflow-hidden">
+                                    <div 
+                                        class=${`h-2 rounded-full transition-all duration-1000 ${colorTheme.bar}`}
+                                        style=${{ width: `${item.percentage}%` }}
+                                    ></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-slate-500 font-bold uppercase">
+                                    <span>${item.studentsAssessed} Assessed</span>
+                                    <span>${item.totalEnrolled} Total</span>
+                                </div>
+                            </div>
+                        `;
+                        })}
+                    </div>
                 </div>
             </div>
         </div>
