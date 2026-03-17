@@ -178,8 +178,9 @@ export const FeesRegister = ({ data }) => {
 
             <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                 <table class="w-full text-left min-w-[800px]">
-                        <thead class="bg-slate-50 border-b text-[10px] font-bold text-slate-500 uppercase">
+                        <thead class="bg-slate-800 text-white text-[10px] font-bold uppercase" style="print-color-adjust:exact; -webkit-print-color-adjust:exact;">
                             <tr>
+                                <th class="px-6 py-4">#</th>
                                 <th class="px-6 py-4">Student Name</th>
                                 <th class="px-6 py-4">Adm #</th>
                                 <th class="px-6 py-4">Grade</th>
@@ -188,15 +189,11 @@ export const FeesRegister = ({ data }) => {
                                 <th class="px-6 py-4 text-right">Arrears</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-50">
-                            ${paginatedData.map(s => html`
-                                <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
-                            `)}
-                        </tbody>
-                        <!-- Print view: All records (hidden on screen, visible in print) -->
-                        <tbody class="divide-y divide-slate-50 hidden print:block">
-                            ${filteredData.map(s => html`
-                                <tr key=${s.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                        <!-- Screen view: paginated rows -->
+                        <tbody class="divide-y divide-slate-100 print:hidden">
+                            ${paginatedData.map((s, i) => html`
+                                <tr key=${s.id} class="hover:bg-slate-50 transition-colors">
+                                    <td class="px-6 py-4 text-xs text-slate-400 font-mono">${(currentPage - 1) * itemsPerPage + i + 1}</td>
                                     <td class="px-6 py-4">
                                         <div class="font-bold text-sm">${s.name}</div>
                                         <div class="text-[10px] text-slate-400">${s.stream || 'No Stream'}</div>
@@ -214,17 +211,43 @@ export const FeesRegister = ({ data }) => {
                                     </td>
                                 </tr>
                             `)}
+                            ${paginatedData.length === 0 && html`
+                                <tr><td colspan="7" class="p-12 text-center text-slate-300">No student records found matching filters.</td></tr>
+                            `}
+                        </tbody>
+                        <!-- Print view: all filtered rows -->
+                        <tbody class="divide-y divide-slate-100 hidden print:table-row-group">
+                            ${filteredData.map((s, i) => html`
+                                <tr key=${s.id} class="even:bg-slate-50">
+                                    <td class="px-6 py-3 text-xs text-slate-400 font-mono">${i + 1}</td>
+                                    <td class="px-6 py-3">
+                                        <div class="font-bold text-sm">${s.name}</div>
+                                        <div class="text-[10px] text-slate-400">${s.stream || 'No Stream'}</div>
+                                    </td>
+                                    <td class="px-6 py-3 text-xs font-mono text-slate-500">${s.admissionNo}</td>
+                                    <td class="px-6 py-3">
+                                        <span class="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold uppercase">${s.grade}</span>
+                                    </td>
+                                    <td class="px-6 py-3 text-right font-medium text-sm text-slate-600">${settings.currency} ${s.totalDue.toLocaleString()}</td>
+                                    <td class="px-6 py-3 text-right font-bold text-sm text-green-600">${settings.currency} ${s.totalPaid.toLocaleString()}</td>
+                                    <td class="px-6 py-3 text-right">
+                                        <span class=${`font-black text-sm ${s.balance > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                            ${settings.currency} ${s.balance.toLocaleString()}
+                                        </span>
+                                    </td>
+                                </tr>
+                            `)}
                             ${filteredData.length === 0 && html`
-                                <tr><td colspan="6" class="p-12 text-center text-slate-300">No student records found matching filters.</td></tr>
+                                <tr><td colspan="7" class="p-12 text-center text-slate-300">No student records found matching filters.</td></tr>
                             `}
                         </tbody>
                         ${filteredData.length > 0 && html`
-                            <tfoot class="bg-slate-50 font-black text-sm border-t-2 border-slate-200">
+                            <tfoot class="bg-slate-100 font-black text-sm border-t-2 border-slate-300" style="print-color-adjust:exact; -webkit-print-color-adjust:exact;">
                                 <tr>
-                                    <td colspan="3" class="px-6 py-4 text-right uppercase text-xs">Page Totals:</td>
-                                    <td class="px-6 py-4 text-right">${settings.currency} ${filteredData.reduce((a, b) => a + b.totalDue, 0).toLocaleString()}</td>
-                                    <td class="px-6 py-4 text-right text-green-600">${settings.currency} ${filteredData.reduce((a, b) => a + b.totalPaid, 0).toLocaleString()}</td>
-                                    <td class="px-6 py-4 text-right text-red-600">${settings.currency} ${filteredData.reduce((a, b) => a + b.balance, 0).toLocaleString()}</td>
+                                    <td colspan="4" class="px-6 py-4 text-right uppercase text-xs text-slate-600">Grand Totals:</td>
+                                    <td class="px-6 py-4 text-right text-slate-800">${settings.currency} ${filteredData.reduce((a, b) => a + b.totalDue, 0).toLocaleString()}</td>
+                                    <td class="px-6 py-4 text-right text-green-700">${settings.currency} ${filteredData.reduce((a, b) => a + b.totalPaid, 0).toLocaleString()}</td>
+                                    <td class="px-6 py-4 text-right text-red-700">${settings.currency} ${filteredData.reduce((a, b) => a + b.balance, 0).toLocaleString()}</td>
                                 </tr>
                             </tfoot>
                         `}

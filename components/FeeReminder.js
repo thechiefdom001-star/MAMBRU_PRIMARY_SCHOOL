@@ -177,6 +177,20 @@ export const FeeReminder = ({ data }) => {
                         .reminder-card .text-xs { font-size: 9pt !important; }
                         .reminder-card .text-[10px] { font-size: 8pt !important; }
                         .reminder-card .text-[9px] { font-size: 7pt !important; }
+                        /* Force dark header background to print */
+                        .fee-reminder-thead {
+                            background-color: #1e293b !important;
+                            color: #ffffff !important;
+                            -webkit-print-color-adjust: exact !important;
+                            print-color-adjust: exact !important;
+                        }
+                        .fee-reminder-thead th {
+                            color: #ffffff !important;
+                        }
+                        /* Stamp visibility */
+                        .reminder-stamp {
+                            opacity: 0.5 !important;
+                        }
                     }
                 </style>
                 ${filteredStudents.map(student => {
@@ -197,9 +211,14 @@ export const FeeReminder = ({ data }) => {
                                     <p class="text-[9px] sm:text-[10px] font-bold text-slate-500 leading-tight max-w-[250px] sm:ml-auto">${settings.schoolAddress}</p>
                                 </div>
                             </div>
-                            <div class="flex justify-center mb-4 sm:mb-6">
-                                <div class="bg-slate-900 text-white px-4 sm:px-6 py-1 rounded text-[8px] sm:text-[10px] font-black uppercase tracking-widest">
-                                    Official Fee Balance Notice ${selectedTerm !== 'ALL' ? `- ${selectedTerm}` : ''} • ${settings.academicYear}
+                            <div class="flex justify-center mb-4 sm:mb-6 w-full">
+                                <div class="w-full text-center" style="print-color-adjust:exact; -webkit-print-color-adjust:exact;">
+                                    <div style="border-top: 2px solid #0f172a; margin-bottom: 4px;"></div>
+                                    <p class="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-900 py-1"
+                                       style="color:#0f172a; letter-spacing:0.12em;">
+                                        Official Fee Balance Notice${selectedTerm !== 'ALL' ? ` — ${selectedTerm}` : ''} &nbsp;•&nbsp; ${settings.academicYear}
+                                    </p>
+                                    <div style="border-top: 2px solid #0f172a; margin-top: 4px;"></div>
                                 </div>
                             </div>
 
@@ -225,12 +244,12 @@ export const FeeReminder = ({ data }) => {
                             <!-- Breakdown Table -->
                             <div class="border border-slate-900 rounded-lg overflow-x-auto no-scrollbar mb-4 sm:mb-6 w-full max-w-full">
                                 <table class="w-full text-xs sm:text-sm">
-                                    <thead class="bg-slate-900 text-white">
+                                    <thead class="bg-slate-900 text-white fee-reminder-thead" style="print-color-adjust:exact; -webkit-print-color-adjust:exact; background-color:#1e293b; color:#fff;">
                                         <tr>
-                                            <th class="p-1.5 sm:p-3 text-left uppercase text-[7px] sm:text-[10px] font-black">Description</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black">Due</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black">Paid</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black">Bal</th>
+                                            <th class="p-1.5 sm:p-3 text-left uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Description</th>
+                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Due</th>
+                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Paid</th>
+                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Bal</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-slate-200">
@@ -316,10 +335,10 @@ export const FeeReminder = ({ data }) => {
                                         <p class="text-[9px] font-black uppercase text-slate-500">Accounts Dept</p>
                                     </div>
                                     <div class="text-center w-48 flex flex-col items-center">
-                                        <div class="w-12 h-12 opacity-20 grayscale">
+                                        <div class="w-16 h-16 reminder-stamp" style="opacity:0.5;">
                                             <img src="${settings.schoolLogo}" class="w-full h-full object-contain" />
                                         </div>
-                                        <p class="text-[9px] font-black uppercase text-slate-500">Stamp</p>
+                                        <p class="text-[9px] font-black uppercase text-slate-500">Official Stamp</p>
                                     </div>
                                 </div>
                             </div>
