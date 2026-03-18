@@ -17,6 +17,9 @@ const SHEET_NAMES = {
   STUDENTS: 'Students',
   ASSESSMENTS: 'Assessments',
   ATTENDANCE: 'Attendance',
+  TEACHERS: 'Teachers',
+  STAFF: 'Staff',
+  PAYMENTS: 'Payments',
   ACTIVITY: 'Activity'  // For tracking active users
 };
 
@@ -24,6 +27,9 @@ const SHEET_NAMES = {
 const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees'];
 const ASSESSMENT_HEADERS = ['id', 'studentId', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
+const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
+const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
+const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt'];
 
 /**
  * Initialize sheets with headers if they don't exist
@@ -52,6 +58,27 @@ function initializeSheets() {
     attendanceSheet.appendRow(ATTENDANCE_HEADERS);
   }
   
+  // Create Teachers sheet
+  let teachersSheet = ss.getSheetByName(SHEET_NAMES.TEACHERS);
+  if (!teachersSheet) {
+    teachersSheet = ss.insertSheet(SHEET_NAMES.TEACHERS);
+    teachersSheet.appendRow(TEACHER_HEADERS);
+  }
+
+  // Create Staff sheet
+  let staffSheet = ss.getSheetByName(SHEET_NAMES.STAFF);
+  if (!staffSheet) {
+    staffSheet = ss.insertSheet(SHEET_NAMES.STAFF);
+    staffSheet.appendRow(STAFF_HEADERS);
+  }
+
+  // Create Payments sheet
+  let paymentsSheet = ss.getSheetByName(SHEET_NAMES.PAYMENTS);
+  if (!paymentsSheet) {
+    paymentsSheet = ss.insertSheet(SHEET_NAMES.PAYMENTS);
+    paymentsSheet.appendRow(PAYMENT_HEADERS);
+  }
+
   // Create Activity sheet
   let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
   if (!activitySheet) {
@@ -114,13 +141,62 @@ function doGet(e) {
         .createTextOutput(JSON.stringify(response))
         .setMimeType(ContentService.MimeType.JSON);
     }
-    
-    // Handle deleteAssessment via GET
-    if (action === 'deleteAssessment' && postData.recordId) {
-      response = deleteRecord(SHEET_NAMES.ASSESSMENTS, 'id', postData.recordId, ASSESSMENT_HEADERS);
+
+    // Handle addTeacher via GET
+    if (action === 'addTeacher' && postData.teacher) {
+      const teacher = postData.teacher;
+      if (!teacher.id) {
+        teacher.id = 'T-' + Date.now();
+      }
+      response = addRecord(SHEET_NAMES.TEACHERS, teacher, TEACHER_HEADERS);
       return ContentService
         .createTextOutput(JSON.stringify(response))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Handle addStaff via GET
+    if (action === 'addStaff' && postData.staff) {
+      const staff = postData.staff;
+      if (!staff.id) {
+        staff.id = 'S-' + Date.now();
+      }
+      response = addRecord(SHEET_NAMES.STAFF, staff, STAFF_HEADERS);
+      return ContentService
+        .createTextOutput(JSON.stringify(response))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Handle deleteRecord via GET (query params)
+    if (action === 'deleteRecord') {
+      const sheetName = e.parameter.sheetName || postData.sheetName;
+      const recordId = e.parameter.recordId || postData.recordId;
+      if (sheetName && recordId) {
+        const deleteHeaders = sheetName === SHEET_NAMES.STUDENTS ? STUDENT_HEADERS :
+                             sheetName === SHEET_NAMES.TEACHERS ? TEACHER_HEADERS :
+                             sheetName === SHEET_NAMES.STAFF ? STAFF_HEADERS :
+                             sheetName === SHEET_NAMES.PAYMENTS ? PAYMENT_HEADERS :
+                             sheetName === SHEET_NAMES.ASSESSMENTS ? ASSESSMENT_HEADERS : ATTENDANCE_HEADERS;
+        response = deleteRecord(sheetName, 'id', recordId, deleteHeaders);
+        return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    // Handle deleteAssessment via GET
+    if (action === 'deleteAssessment') {
+      const recordId = e.parameter.recordId || postData.recordId;
+      if (recordId) {
+        response = deleteRecord(SHEET_NAMES.ASSESSMENTS, 'id', recordId, ASSESSMENT_HEADERS);
+        return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    // Handle deleteStudent via GET
+    if (action === 'deleteStudent') {
+      const recordId = e.parameter.recordId || postData.recordId;
+      if (recordId) {
+        response = deleteRecord(SHEET_NAMES.STUDENTS, 'id', recordId, STUDENT_HEADERS);
+        return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+      }
     }
     
     switch (action) {
@@ -128,7 +204,9 @@ function doGet(e) {
         response = {
           students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
           assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
-          attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS)
+          attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
+          teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
+          staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS)
         };
         break;
         
@@ -307,6 +385,39 @@ function doPost(e) {
       case 'updateAttendance':
         response = updateRecord(SHEET_NAMES.ATTENDANCE, 'id', data.attendance.id, data.attendance, ATTENDANCE_HEADERS);
         break;
+
+      case 'addTeacher':
+        if (!data.teacher.id) {
+          data.teacher.id = 'T-' + Date.now();
+        }
+        response = addRecord(SHEET_NAMES.TEACHERS, data.teacher, TEACHER_HEADERS);
+        break;
+
+      case 'updateTeacher':
+        response = updateRecord(SHEET_NAMES.TEACHERS, 'id', data.teacher.id, data.teacher, TEACHER_HEADERS);
+        break;
+
+      case 'addStaff':
+        if (!data.staff.id) {
+          data.staff.id = 'S-' + Date.now();
+        }
+        response = addRecord(SHEET_NAMES.STAFF, data.staff, STAFF_HEADERS);
+        break;
+
+      case 'updateStaff':
+        response = updateRecord(SHEET_NAMES.STAFF, 'id', data.staff.id, data.staff, STAFF_HEADERS);
+        break;
+
+      case 'addPayment':
+        if (!data.payment.id) {
+          data.payment.id = 'PAY-' + Date.now();
+        }
+        response = addRecord(SHEET_NAMES.PAYMENTS, data.payment, PAYMENT_HEADERS);
+        break;
+
+      case 'updatePayment':
+        response = updateRecord(SHEET_NAMES.PAYMENTS, 'id', data.payment.id, data.payment, PAYMENT_HEADERS);
+        break;
         
       case 'bulkAddAssessments':
         response = bulkAddRecords(SHEET_NAMES.ASSESSMENTS, data.assessments, ASSESSMENT_HEADERS);
@@ -318,7 +429,10 @@ function doPost(e) {
           success: true,
           students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
           assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
-          attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS)
+          attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
+          teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
+          staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
+          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS)
         };
         break;
         
@@ -328,13 +442,37 @@ function doPost(e) {
         response = replaceAllRecords(data.sheetName, data.records, data.headers);
         console.log('replaceAll result:', response);
         break;
+
+      case 'updateRecord':
+        // Generic update handler for any sheet
+        const uSheet = data.sheetName;
+        let uHeaders = [];
+        if (uSheet === SHEET_NAMES.STUDENTS) uHeaders = STUDENT_HEADERS;
+        else if (uSheet === SHEET_NAMES.TEACHERS) uHeaders = TEACHER_HEADERS;
+        else if (uSheet === SHEET_NAMES.STAFF) uHeaders = STAFF_HEADERS;
+        else if (uSheet === SHEET_NAMES.ASSESSMENTS) uHeaders = ASSESSMENT_HEADERS;
+        else if (uSheet === SHEET_NAMES.ATTENDANCE) uHeaders = ATTENDANCE_HEADERS;
+        else if (uSheet === SHEET_NAMES.PAYMENTS) uHeaders = PAYMENT_HEADERS;
+        
+        if (uHeaders.length > 0 && data.record && data.record.id) {
+          response = updateRecord(uSheet, 'id', data.record.id, data.record, uHeaders);
+        } else {
+          response = { success: false, error: 'Invalid sheet or record' };
+        }
+        break;
         
       case 'deleteRecord':
         // Delete a specific record by ID
-        const deleteSheet = data.sheetName || SHEET_NAMES.ASSESSMENTS;
-        const deleteHeaders = deleteSheet === SHEET_NAMES.STUDENTS ? STUDENT_HEADERS :
-                             deleteSheet === SHEET_NAMES.ASSESSMENTS ? ASSESSMENT_HEADERS : ATTENDANCE_HEADERS;
-        response = deleteRecord(deleteSheet, 'id', data.recordId, deleteHeaders);
+        const dSheet = data.sheetName || SHEET_NAMES.ASSESSMENTS;
+        const dHeaders = dSheet === SHEET_NAMES.STUDENTS ? STUDENT_HEADERS :
+                        dSheet === SHEET_NAMES.TEACHERS ? TEACHER_HEADERS :
+                        dSheet === SHEET_NAMES.STAFF ? STAFF_HEADERS :
+                        dSheet === SHEET_NAMES.PAYMENTS ? PAYMENT_HEADERS :
+                        dSheet === SHEET_NAMES.ASSESSMENTS ? ASSESSMENT_HEADERS : ATTENDANCE_HEADERS;
+        response = deleteRecord(dSheet, 'id', data.recordId, dHeaders);
+        if (response.success) {
+          console.log('Successfully deleted record:', data.recordId, 'from', dSheet);
+        }
         break;
         
       case 'deleteAssessment':
@@ -343,6 +481,14 @@ function doPost(e) {
         
       case 'deleteStudent':
         response = deleteRecord(SHEET_NAMES.STUDENTS, 'id', data.recordId, STUDENT_HEADERS);
+        break;
+        
+      case 'deleteTeacher':
+        response = deleteRecord(SHEET_NAMES.TEACHERS, 'id', data.recordId, TEACHER_HEADERS);
+        break;
+        
+      case 'deleteStaff':
+        response = deleteRecord(SHEET_NAMES.STAFF, 'id', data.recordId, STAFF_HEADERS);
         break;
         
       case 'bulkPushStudents':
@@ -355,6 +501,14 @@ function doPost(e) {
         
       case 'bulkPushAttendance':
         response = bulkPushRecords(SHEET_NAMES.ATTENDANCE, data.attendance || [], ATTENDANCE_HEADERS);
+        break;
+
+      case 'bulkPushPayments':
+        response = bulkPushRecords(SHEET_NAMES.PAYMENTS, data.payments || [], PAYMENT_HEADERS);
+        break;
+
+      case 'deletePayment':
+        response = deleteRecord(SHEET_NAMES.PAYMENTS, 'id', data.recordId, PAYMENT_HEADERS);
         break;
         
       case 'setActive':

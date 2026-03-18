@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { paymentService } from '../lib/paymentService.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -20,6 +21,7 @@ export const Fees = ({ data, setData }) => {
     const [promptPhone, setPromptPhone] = useState('');
     const [promptMethod, setPromptMethod] = useState('mpesa');
     const [promptStatus, setPromptStatus] = useState('');
+    const [syncStatus, setSyncStatus] = useState('');
 
     const streams = (data && data.settings && data.settings.streams) || [];
 
@@ -154,7 +156,31 @@ export const Fees = ({ data, setData }) => {
         const studentPayments = (data.payments || []).filter(p => p.studentId === selectedStudentId);
         const allPaymentsForStudent = [...studentPayments, newPayment];
 
-        setData({ ...data, payments: [...(data.payments || []), newPayment] });
+        // UPDATE LOCAL STATE IMMEDIATELY
+        const updatedData = { ...data, payments: [...(data.payments || []), newPayment] };
+        setData(updatedData);
+
+        // Then sync to Google Sheet asynchronously
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus('Syncing payment to Google...');
+            googleSheetSync.setSettings(data.settings);
+            
+            googleSheetSync.pushPayment(newPayment).then(res => {
+                if (res.success) {
+                    setSyncStatus('✓ Payment recorded & synced to Google');
+                    console.log('Payment synced successfully:', newPayment.id);
+                } else {
+                    setSyncStatus('⚠ Payment recorded locally (sync pending)');
+                    console.warn('Payment sync failed:', res.error);
+                }
+                setTimeout(() => setSyncStatus(''), 3000);
+            }).catch(err => {
+                setSyncStatus('⚠ Payment recorded locally (sync pending)');
+                console.error('Payment sync error:', err);
+                setTimeout(() => setSyncStatus(''), 3000);
+            });
+        }
+
         setReceipt({
             ...newPayment,
             studentName: student.name,
@@ -285,7 +311,25 @@ export const Fees = ({ data, setData }) => {
             return p;
         });
 
+        // UPDATE LOCAL STATE IMMEDIATELY
         setData({ ...data, payments: updatedPayments });
+        
+        // SYNC TO GOOGLE INSTANTLY
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus('Voiding payment...');
+            googleSheetSync.setSettings(data.settings);
+            const voidedPayment = updatedPayments.find(p => p.id === paymentId);
+            
+            googleSheetSync.pushPayment(voidedPayment).then(res => {
+                if (res.success) setSyncStatus('✓ Payment voided & synced');
+                else setSyncStatus('⚠ Voided locally (sync pending)');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }).catch(err => {
+                setSyncStatus('⚠ Voided locally (sync pending)');
+                setTimeout(() => setSyncStatus(''), 3000);
+            });
+        }
+
         setReceipt(null);
         alert('Payment has been VOIDED successfully!');
     };
@@ -300,7 +344,25 @@ export const Fees = ({ data, setData }) => {
             return p;
         });
 
+        // UPDATE LOCAL STATE IMMEDIATELY
         setData({ ...data, payments: updatedPayments });
+
+        // SYNC TO GOOGLE INSTANTLY
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus('Restoring payment...');
+            googleSheetSync.setSettings(data.settings);
+            const restoredPayment = updatedPayments.find(p => p.id === paymentId);
+            
+            googleSheetSync.pushPayment(restoredPayment).then(res => {
+                if (res.success) setSyncStatus('✓ Payment restored & synced');
+                else setSyncStatus('⚠ Restored locally (sync pending)');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }).catch(err => {
+                setSyncStatus('⚠ Restored locally (sync pending)');
+                setTimeout(() => setSyncStatus(''), 3000);
+            });
+        }
+
         alert('Payment restored successfully!');
     };
 
@@ -405,7 +467,10 @@ export const Fees = ({ data, setData }) => {
                 </div>
             `}
 
-            <h2 class="text-2xl font-bold no-print">Fee Management</h2>
+            <div class="flex justify-between items-center no-print">
+                <h2 class="text-2xl font-bold">Fee Management</h2>
+                ${syncStatus && html`<span class="text-[10px] font-bold px-3 py-1 bg-blue-50 text-blue-600 rounded-full animate-pulse">${syncStatus}</span>`}
+            </div>
 
             <div class="flex justify-end no-print">
                 <button 

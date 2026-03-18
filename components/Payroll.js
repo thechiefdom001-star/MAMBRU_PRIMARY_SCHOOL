@@ -570,14 +570,14 @@ export const Payroll = ({ data, setData }) => {
 
                                 <!-- NET PAY BANNER -->
                                 <div class="col-span-full p-4 flex flex-col border-t-2 border-slate-800"
-                                     style="background:#1e293b; print-color-adjust:exact; -webkit-print-color-adjust:exact;">
+                                     style="background:#7FFFD4; print-color-adjust:exact; -webkit-print-color-adjust:exact;">
                                     <div class="flex justify-between items-center">
-                                        <span class="font-black uppercase text-[11px] tracking-widest" style="color:#fff;">Net Pay (Take Home)</span>
-                                        <span class="text-2xl font-black" style="color:#86efac;">${data.settings.currency} ${Math.round(activePayslip.entry.netPay).toLocaleString()}</span>
+                                        <span class="font-black uppercase text-[11px] tracking-widest text-[#1e293b]">Net Pay (Take Home)</span>
+                                        <span class="text-2xl font-black text-[#1e293b]">${data.settings.currency} ${Math.round(activePayslip.entry.netPay).toLocaleString()}</span>
                                     </div>
-                                    <div class="mt-2 border-t border-white/20 pt-2">
-                                        <p class="text-[8px] font-bold uppercase" style="color:#94a3b8;">Amount in Words:</p>
-                                        <p class="text-[10px] font-medium italic" style="color:#e2e8f0;">${Storage.numberToWords(Math.round(activePayslip.entry.netPay))}</p>
+                                    <div class="mt-2 border-t border-[#1e293b]/20 pt-2">
+                                        <p class="text-[8px] font-bold uppercase text-[#475569]">Amount in Words:</p>
+                                        <p class="text-[10px] font-medium italic text-[#1e293b]">${Storage.numberToWords(Math.round(activePayslip.entry.netPay))}</p>
                                     </div>
                                 </div>
                             </div>

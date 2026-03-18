@@ -175,23 +175,23 @@ const App = () => {
 
         // Create efficient maps for comparison
         const sheetStudents = sheetData.students || [];
-        const sheetMap = new Map(sheetStudents.map(s => {
-            const cleaned = { ...s, selectedFees: Storage.parseSelectedFees(s.selectedFees) };
-            return [(s.admissionNo ? String(s.admissionNo).trim() : ''), cleaned];
-        }));
         
         const sheetAssess = sheetData.assessments || [];
         const assessMap = new Map(sheetAssess.map(a => 
-            [`${a.studentId}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`, a]
+            [`${String(a.studentId)}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`, a]
         ));
         
         const sheetAtt = sheetData.attendance || [];
-        const attMap = new Map(sheetAtt.map(a => [`${a.studentId}-${a.date}`, a]));
+        const attMap = new Map(sheetAtt.map(a => [`${String(a.studentId)}-${a.date}`, a]));
+
+        const sheetPay = sheetData.payments || [];
+        const payMap = new Map(sheetPay.map(p => [String(p.id), p]));
 
         // Identify ALL changes first
         const studentsToSync = [];
         const assessmentsToSync = [];
         const attendanceToSync = [];
+        const paymentsToSync = [];
 
         const isStudentEqual = (local, remote) => {
             if (!remote) return false;
@@ -218,16 +218,32 @@ const App = () => {
             return String(local.status) === String(remote.status);
         };
 
+        const isPaymentEqual = (local, remote) => {
+            if (!remote) return false;
+            if (String(local.amount) !== String(remote.amount)) return false;
+            if (local.voided !== remote.voided) return false;
+            return true;
+        };
+
+        // Build a case-insensitive map for students
+        const sheetStudentsMap = new Map();
+        for (const s of sheetStudents) {
+            const admLower = String(s.admissionNo || '').toLowerCase().trim();
+            if (admLower && !sheetStudentsMap.has(admLower)) {
+                sheetStudentsMap.set(admLower, s);
+            }
+        }
+
         for (const s of (data.students || [])) {
-            const admNo = s.admissionNo ? String(s.admissionNo).trim() : '';
-            const remote = sheetMap.get(admNo);
+            const admNo = s.admissionNo ? String(s.admissionNo).trim().toLowerCase() : '';
+            const remote = sheetStudentsMap.get(admNo);
             if (!isStudentEqual(s, remote)) {
                 studentsToSync.push(s);
             }
         }
 
         for (const a of (data.assessments || [])) {
-            const key = `${a.studentId}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`;
+            const key = `${String(a.studentId)}-${a.subject}-${a.term}-${a.examType}-${a.academicYear}`;
             const remote = assessMap.get(key);
             if (!isAssessmentEqual(a, remote)) {
                 assessmentsToSync.push(a);
@@ -235,10 +251,17 @@ const App = () => {
         }
 
         for (const a of (data.attendance || [])) {
-            const key = `${a.studentId}-${a.date}`;
+            const key = `${String(a.studentId)}-${a.date}`;
             const remote = attMap.get(key);
             if (!isAttendanceEqual(a, remote)) {
                 attendanceToSync.push(a);
+            }
+        }
+
+        for (const p of (data.payments || [])) {
+            const remote = payMap.get(String(p.id));
+            if (!isPaymentEqual(p, remote)) {
+                paymentsToSync.push(p);
             }
         }
 
@@ -255,6 +278,10 @@ const App = () => {
         
         if (attendanceToSync.length > 0) {
             syncPromises.push(googleSheetSync.bulkPushAttendance(attendanceToSync).catch(e => console.error('Attendance sync error:', e)));
+        }
+
+        if (paymentsToSync.length > 0) {
+            syncPromises.push(googleSheetSync.bulkPushPayments(paymentsToSync).catch(e => console.error('Payment sync error:', e)));
         }
 
         if (syncPromises.length > 0) {
@@ -306,7 +333,10 @@ const App = () => {
                     const merged = Storage.replaceWithGoogleData(data, {
                         students: result.students || [],
                         assessments: result.assessments || [],
-                        attendance: result.attendance || []
+                        attendance: result.attendance || [],
+                        payments: result.payments || [],
+                        teachers: result.teachers || [],
+                        staff: result.staff || []
                     });
                     
                     console.log('✅ After replaceWithGoogleData - merged students:', merged?.students?.length);
@@ -380,7 +410,10 @@ const App = () => {
                         const merged = Storage.replaceWithGoogleData(data, {
                             students: result.students,
                             assessments: result.assessments,
-                            attendance: result.attendance
+                            attendance: result.attendance,
+                            payments: result.payments,
+                            teachers: result.teachers,
+                            staff: result.staff
                         });
                         
                         setData(merged);
@@ -667,6 +700,73 @@ const App = () => {
                     .text-slate-900 { color: #f8fafc !important; }
                     .text-slate-500, .text-slate-400 { color: #94a3b8 !important; }
                 ` : ''}
+
+                /* GLOBAL PRINT STYLES */
+                @media print {
+                    @page {
+                        size: A4 portrait;
+                        margin: 10mm;
+                    }
+
+                    * {
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                    }
+
+                    html, body {
+                        width: 100%;
+                        height: auto;
+                        margin: 0;
+                        padding: 0;
+                        background: white !important;
+                    }
+
+                    /* Hide header, sidebar, and nav */
+                    header,
+                    .no-print,
+                    [class*="sidebar"],
+                    nav,
+                    button,
+                    [class*="mobile"],
+                    .hidden {
+                        display: none !important;
+                    }
+
+                    /* Main layout for printing */
+                    .flex.flex-1.overflow-hidden {
+                        display: block !important;
+                        flex: none !important;
+                        overflow: visible !important;
+                    }
+
+                    main {
+                        display: block !important;
+                        flex: none !important;
+                        width: 100% !important;
+                        overflow: visible !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+
+                    .max-w-6xl {
+                        max-width: 100% !important;
+                    }
+
+                    /* Preserve colors */
+                    [class*="bg-"] {
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+
+                    [class*="text-"] {
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+
+                    .rounded-2xl, .rounded-xl, .rounded-lg {
+                        border-radius: 0.5rem !important; /* Keep some rounding but subtle */
+                    }
+                }
             </style>
 
             <!-- Navbar -->

@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Pagination } from '../lib/pagination.js';
 import { PaginationControls } from './Pagination.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -11,6 +12,7 @@ export const Staff = ({ data, setData }) => {
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [syncStatus, setSyncStatus] = useState('');
     const [newStaff, setNewStaff] = useState({ 
         name: '', 
         role: '', 
@@ -21,15 +23,38 @@ export const Staff = ({ data, setData }) => {
         taxNo: ''
     });
 
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
+        
+        let staffToSave;
         if (editingId) {
-            const updated = data.staff.map(s => s.id === editingId ? { ...newStaff, id: editingId } : s);
+            staffToSave = { ...newStaff, id: editingId };
+            const updated = data.staff.map(s => s.id === editingId ? staffToSave : s);
             setData({ ...data, staff: updated });
             setEditingId(null);
+
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Updating Google Sheet...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.updateRecord('Staff', staffToSave);
+                setSyncStatus(resp.success ? '✓ Updated in Sheet!' : '⚠ Local updated, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
         } else {
             const id = 'S-' + Date.now();
-            setData({ ...data, staff: [...(data.staff || []), { ...newStaff, id }] });
+            staffToSave = { ...newStaff, id };
+            setData({ ...data, staff: [...(data.staff || []), staffToSave] });
+
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Syncing to Google...');
+                googleSheetSync.setSettings(data.settings);
+                // Use pushRecord for new entries (mimics Student saving logic)
+                const resp = await googleSheetSync.pushRecord('Staff', staffToSave);
+                setSyncStatus(resp.success ? '✓ Synced!' : '⚠ Local saved, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
         }
         setShowAdd(false);
         resetForm();
@@ -54,9 +79,48 @@ export const Staff = ({ data, setData }) => {
         setShowAdd(true);
     };
 
-    const handleDelete = (id) => {
-        if (confirm('Remove staff member from registry?')) {
+    const handleDelete = async (id) => {
+        if (confirm('Remove staff member from registry? This will also remove them from the Google Sheet if connected.')) {
             setData({ ...data, staff: (data.staff || []).filter(s => s.id !== id) });
+
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Deleting from Sheet...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.deleteStaff(id);
+                setSyncStatus(resp.success ? '✓ Deleted from Sheet!' : '⚠ Local deleted, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
+        }
+    };
+
+    // Detect and sync deletions made in Google Sheet
+    const handleSyncDeletions = async () => {
+        if (!data.settings.googleScriptUrl) {
+            setSyncStatus('⚠ Google Sheet not connected');
+            setTimeout(() => setSyncStatus(''), 2000);
+            return;
+        }
+
+        setSyncStatus('Checking for remote deletions...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            const deletionInfo = await googleSheetSync.detectDeletions('Staff', data.staff || []);
+            
+            if (deletionInfo.deletionCount > 0) {
+                const updatedStaff = data.staff.filter(s => !deletionInfo.deletedIds.includes(String(s.id)));
+                setData({ ...data, staff: updatedStaff });
+                setSyncStatus(`✓ Synced! Removed ${deletionInfo.deletionCount} deleted staff member(s)`);
+            } else {
+                setSyncStatus('✓ No remote changes detected');
+            }
+            
+            setTimeout(() => setSyncStatus(''), 3000);
+        } catch (error) {
+            console.error('Sync error:', error);
+            setSyncStatus('⚠ Sync check failed - please try again');
+            setTimeout(() => setSyncStatus(''), 3000);
         }
     };
 
@@ -80,9 +144,19 @@ export const Staff = ({ data, setData }) => {
                 <div>
                     <h2 class="text-2xl font-bold">Support Staff Registry</h2>
                     <p class="text-slate-500 text-sm">Management of non-teaching personnel</p>
+                    ${syncStatus && html`<p class="text-[10px] font-black uppercase text-blue-600 animate-pulse mt-1">${syncStatus}</p>`}
                 </div>
                 <div class="flex gap-2 w-full md:w-auto">
                     <button onClick=${() => window.print()} class="flex-1 md:flex-none bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200">Print List</button>
+                    ${data.settings.googleScriptUrl && html`
+                        <button 
+                            onClick=${handleSyncDeletions}
+                            class="flex-1 md:flex-none bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-purple-700 no-print"
+                            title="Check for staff deleted in Google Sheet"
+                        >
+                            ↻ Sync from Sheet
+                        </button>
+                    `}
                     <button 
                         onClick=${() => { if(showAdd) resetForm(); setShowAdd(!showAdd); }}
                         class="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-blue-700"

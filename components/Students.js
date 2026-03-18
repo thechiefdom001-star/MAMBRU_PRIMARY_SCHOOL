@@ -23,6 +23,36 @@ export const Students = ({ data, setData, onSelectStudent }) => {
         setCurrentPage(1);
     }, [data.students?.length]);
 
+    // Auto-check for remote deletions on load (with delay to let initial data load)
+    useEffect(() => {
+        if (!data.settings?.googleScriptUrl || !data.students?.length) return;
+        
+        const checkRemoteDeletions = async () => {
+            try {
+                googleSheetSync.setSettings(data.settings);
+                const deletionInfo = await googleSheetSync.detectDeletions('Students', data.students || []);
+                
+                if (deletionInfo.deletionCount > 0) {
+                    // Students were deleted in the sheet, remove them from local
+                    const updatedStudents = data.students.filter(s => !deletionInfo.deletedIds.includes(String(s.id)));
+                    const updatedAssessments = (data.assessments || []).filter(a => 
+                        !deletionInfo.deletedIds.includes(String(a.studentId))
+                    );
+                    
+                    setData(prev => ({ ...prev, students: updatedStudents, assessments: updatedAssessments }));
+                    setSyncStatus(`✓ Synced! Removed ${deletionInfo.deletionCount} deleted student(s) from Sheet`);
+                    setTimeout(() => setSyncStatus(''), 5000);
+                }
+            } catch (e) {
+                console.warn('Auto deletion sync failed:', e);
+            }
+        };
+        
+        // Check after 5 seconds to let initial data load
+        const timer = setTimeout(checkRemoteDeletions, 5000);
+        return () => clearTimeout(timer);
+    }, [data.settings?.googleScriptUrl, data.students?.length]);
+
     // Get hidden fee items from settings (per grade group)
     const hiddenFeeItems = data.settings?.hiddenFeeItems || {};
     const allHiddenFees = Object.values(hiddenFeeItems).flat();
@@ -173,20 +203,75 @@ export const Students = ({ data, setData, onSelectStudent }) => {
     };
 
     const handleDelete = async (id) => {
-        const student = data.students.find(s => s.id === id);
+        const student = data.students.find(s => String(s.id) === String(id));
         if (!student) return;
 
-        if (!confirm(`Delete ${student.name}? This student and their assessments will be removed from local data. This action also removes them from the Google Sheet if connected.`)) return;
+        if (!confirm(`Delete ${student.name}? This will remove them from local data and Google Sheet.`)) return;
 
-        // Remove locally
-        setData({ ...data, students: data.students.filter(s => s.id !== id) });
+        // Delete assessments for this student locally first
+        const updatedAssessments = (data.assessments || []).filter(a => String(a.studentId) !== String(id));
+        
+        // Remove locally (both student and their assessments)
+        setData({ ...data, students: data.students.filter(s => String(s.id) !== String(id)), assessments: updatedAssessments });
 
         // Delete from Google Sheet
         if (data.settings.googleScriptUrl) {
             setSyncStatus('Deleting from Sheet...');
             googleSheetSync.setSettings(data.settings);
-            const resp = await googleSheetSync.deleteStudent(id);
-            setSyncStatus(resp.success ? '✓ Deleted from Sheet!' : '⚠ Local deleted, Sheet sync pending');
+            try {
+                // Delete student
+                console.log('Deleting student from Google Sheet, ID:', id);
+                const result = await googleSheetSync.deleteStudent(id);
+                console.log('Delete student result:', result);
+                
+                // Also delete their assessments
+                const studentAssessments = (data.assessments || []).filter(a => String(a.studentId) === String(id));
+                for (const assess of studentAssessments) {
+                    await googleSheetSync.deleteAssessment(assess.id);
+                }
+                
+                setSyncStatus(result.success ? '✓ Deleted from Sheet!' : '⚠ Deleted locally, Sheet error: ' + (result.error || ''));
+            } catch (e) {
+                console.error('Delete error:', e);
+                setSyncStatus('⚠ Deleted locally, error: ' + e.message);
+            }
+            setTimeout(() => setSyncStatus(''), 5000);
+        }
+    };
+
+    // Detect and sync deletions made in Google Sheet
+    const handleSyncDeletions = async () => {
+        if (!data.settings.googleScriptUrl) {
+            setSyncStatus('⚠ Google Sheet not connected');
+            setTimeout(() => setSyncStatus(''), 2000);
+            return;
+        }
+
+        setSyncStatus('Checking for remote deletions...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            const deletionInfo = await googleSheetSync.detectDeletions('Students', data.students || []);
+            
+            if (deletionInfo.deletionCount > 0) {
+                // Students were deleted in the sheet, remove them from local data
+                const updatedStudents = data.students.filter(s => !deletionInfo.deletedIds.includes(String(s.id)));
+                
+                // Also remove related assessments for deleted students
+                const updatedAssessments = (data.assessments || []).filter(a => 
+                    !deletionInfo.deletedIds.includes(String(a.studentId))
+                );
+                
+                setSyncStatus(`✓ Synced! Removed ${deletionInfo.deletionCount} deleted student(s)`);
+                setData(prev => ({ ...prev, students: updatedStudents, assessments: updatedAssessments }));
+            } else {
+                setSyncStatus('✓ No remote changes detected');
+            }
+            
+            setTimeout(() => setSyncStatus(''), 3000);
+        } catch (error) {
+            console.error('Sync error:', error);
+            setSyncStatus('⚠ Sync check failed - please try again');
             setTimeout(() => setSyncStatus(''), 3000);
         }
     };
@@ -295,6 +380,15 @@ export const Students = ({ data, setData, onSelectStudent }) => {
                         <option value="ARREARS">With Arrears</option>
                     </select>
                     <button onClick=${() => window.print()} class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200">Print List</button>
+                    ${data.settings.googleScriptUrl && html`
+                        <button 
+                            onClick=${handleSyncDeletions}
+                            class="bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-purple-700 no-print"
+                            title="Check for students deleted in Google Sheet"
+                        >
+                            ↻ Sync from Sheet
+                        </button>
+                    `}
                     <button 
                         onClick=${() => { if (showAdd) resetForm(); setShowAdd(!showAdd); }}
                         class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-blue-700"

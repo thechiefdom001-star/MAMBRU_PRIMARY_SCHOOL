@@ -162,6 +162,36 @@ export const Assessments = ({ data, setData }) => {
             setTimeout(() => setSyncStatus(''), 2500);
         }
     };
+
+    // Detect and sync deletions made in Google Sheet
+    const handleSyncDeletions = async () => {
+        if (!data.settings.googleScriptUrl) {
+            setSyncStatus('⚠ Google Sheet not connected');
+            setTimeout(() => setSyncStatus(''), 2000);
+            return;
+        }
+
+        setSyncStatus('Checking for remote deletions...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            const deletionInfo = await googleSheetSync.detectDeletions('Assessments', data.assessments || []);
+            
+            if (deletionInfo.deletionCount > 0) {
+                const updatedAssessments = data.assessments.filter(a => !deletionInfo.deletedIds.includes(String(a.id)));
+                setData({ ...data, assessments: updatedAssessments });
+                setSyncStatus(`✓ Synced! Removed ${deletionInfo.deletionCount} deleted assessment(s)`);
+            } else {
+                setSyncStatus('✓ No remote changes detected');
+            }
+            
+            setTimeout(() => setSyncStatus(''), 3000);
+        } catch (error) {
+            console.error('Sync error:', error);
+            setSyncStatus('⚠ Sync check failed - please try again');
+            setTimeout(() => setSyncStatus(''), 3000);
+        }
+    };
     
     const syncAllToGoogle = async () => {
         if (!data.settings.googleScriptUrl) {
@@ -210,6 +240,13 @@ export const Assessments = ({ data, setData }) => {
                         >
                             <span>${isSyncing ? '⏳' : '📤'}</span>
                             ${isSyncing ? 'Syncing...' : 'Sync to Sheet'}
+                        </button>
+                        <button 
+                            onClick=${handleSyncDeletions}
+                            class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"
+                            title="Check for assessments deleted in Google Sheet"
+                        >
+                            <span>↻</span> Sync from Sheet
                         </button>
                     </div>
                 `}

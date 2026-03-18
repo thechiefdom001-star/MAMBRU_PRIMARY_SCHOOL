@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Pagination } from '../lib/pagination.js';
 import { PaginationControls } from './Pagination.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -20,6 +21,7 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
     const [editingId, setEditingId] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [syncStatus, setSyncStatus] = useState('');
     const [newTeacher, setNewTeacher] = useState({ 
         name: '', 
         contact: '', 
@@ -43,15 +45,38 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
         return [{ value: grade, label: grade }];
     });
 
-    const handleAdd = (e) => {
+    const handleAdd = async (e) => {
         e.preventDefault();
+        
+        let teacherToSave;
         if (editingId) {
-            const updated = teachersList.map(t => t.id === editingId ? { ...newTeacher, id: editingId } : t);
+            teacherToSave = { ...newTeacher, id: editingId };
+            const updated = teachersList.map(t => t.id === editingId ? teacherToSave : t);
             setData({ ...data, teachers: updated });
             setEditingId(null);
+            
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Updating Google Sheet...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.updateRecord('Teachers', teacherToSave);
+                setSyncStatus(resp.success ? '✓ Updated in Sheet!' : '⚠ Local updated, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
         } else {
             const id = 'T-' + Date.now();
-            setData({ ...data, teachers: [...teachersList, { ...newTeacher, id }] });
+            teacherToSave = { ...newTeacher, id };
+            setData({ ...data, teachers: [...teachersList, teacherToSave] });
+
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Syncing to Google...');
+                googleSheetSync.setSettings(data.settings);
+                // Use pushRecord for new entries (mimics Student saving logic)
+                const resp = await googleSheetSync.pushRecord('Teachers', teacherToSave); 
+                setSyncStatus(resp.success ? '✓ Synced!' : '⚠ Local saved, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
         }
         setShowAdd(false);
         resetForm();
@@ -79,9 +104,48 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
         setShowAdd(true);
     };
 
-    const handleDelete = (id) => {
-        if (confirm('Remove teacher from registry?')) {
+    const handleDelete = async (id) => {
+        if (confirm('Remove teacher from registry? This will also remove them from the Google Sheet if connected.')) {
             setData({ ...data, teachers: teachersList.filter(t => t.id !== id) });
+
+            // Sync to Google
+            if (data.settings.googleScriptUrl) {
+                setSyncStatus('Deleting from Sheet...');
+                googleSheetSync.setSettings(data.settings);
+                const resp = await googleSheetSync.deleteTeacher(id);
+                setSyncStatus(resp.success ? '✓ Deleted from Sheet!' : '⚠ Local deleted, Error in Sheet');
+                setTimeout(() => setSyncStatus(''), 3000);
+            }
+        }
+    };
+
+    // Detect and sync deletions made in Google Sheet
+    const handleSyncDeletions = async () => {
+        if (!data.settings.googleScriptUrl) {
+            setSyncStatus('⚠ Google Sheet not connected');
+            setTimeout(() => setSyncStatus(''), 2000);
+            return;
+        }
+
+        setSyncStatus('Checking for remote deletions...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            const deletionInfo = await googleSheetSync.detectDeletions('Teachers', data.teachers || []);
+            
+            if (deletionInfo.deletionCount > 0) {
+                const updatedTeachers = data.teachers.filter(t => !deletionInfo.deletedIds.includes(String(t.id)));
+                setData({ ...data, teachers: updatedTeachers });
+                setSyncStatus(`✓ Synced! Removed ${deletionInfo.deletionCount} deleted teacher(s)`);
+            } else {
+                setSyncStatus('✓ No remote changes detected');
+            }
+            
+            setTimeout(() => setSyncStatus(''), 3000);
+        } catch (error) {
+            console.error('Sync error:', error);
+            setSyncStatus('⚠ Sync check failed - please try again');
+            setTimeout(() => setSyncStatus(''), 3000);
         }
     };
 
@@ -105,9 +169,19 @@ export const Teachers = ({ data = {}, setData = () => {} }) => {
                 <div>
                     <h2 class="text-2xl font-bold">Teachers Registry</h2>
                     <p class="text-slate-500 text-sm">Academic staff management and assignments</p>
+                    ${syncStatus && html`<p class="text-[10px] font-black uppercase text-blue-600 animate-pulse mt-1">${syncStatus}</p>`}
                 </div>
                 <div class="flex gap-2 w-full md:w-auto">
                     <button onClick=${() => window.print()} class="flex-1 md:flex-none bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200">Print Table</button>
+                    ${data.settings.googleScriptUrl && html`
+                        <button 
+                            onClick=${handleSyncDeletions}
+                            class="flex-1 md:flex-none bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-purple-700 no-print"
+                            title="Check for teachers deleted in Google Sheet"
+                        >
+                            ↻ Sync from Sheet
+                        </button>
+                    `}
                     <button 
                         onClick=${() => { if(showAdd) resetForm(); setShowAdd(!showAdd); }}
                         class="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-blue-700"

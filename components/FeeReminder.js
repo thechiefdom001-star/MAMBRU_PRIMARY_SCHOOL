@@ -17,31 +17,30 @@ export const FeeReminder = ({ data }) => {
         { key: 'admission', label: 'Admission' },
         { key: 'diary', label: 'Diary' },
         { key: 'development', label: 'Development' },
-        { key: 't1', label: 'T1 Tuition' },
-        { key: 't2', label: 'T2 Tuition' },
-        { key: 't3', label: 'T3 Tuition' },
+        { key: 't1', label: 'Term 1 Tuition' },
+        { key: 't2', label: 'Term 2 Tuition' },
+        { key: 't3', label: 'Term 3 Tuition' },
         { key: 'boarding', label: 'Boarding' },
         { key: 'breakfast', label: 'Breakfast' },
         { key: 'lunch', label: 'Lunch' },
-        { key: 'trip', label: 'Trip' },
+        { key: 'trip', label: 'Educational Trip' },
         { key: 'bookFund', label: 'Book Fund' },
-        { key: 'caution', label: 'Caution' },
-        { key: 'uniform', label: 'Uniform' },
-        { key: 'studentCard', label: 'School ID' },
-        { key: 'remedial', label: 'Remedials' },
+        { key: 'caution', label: 'Caution Money' },
+        { key: 'uniform', label: 'School Uniform' },
+        { key: 'studentCard', label: 'Student ID Card' },
+        { key: 'remedial', label: 'Remedial Classes' },
         { key: 'assessmentFee', label: 'Assessment Fee' },
         { key: 'projectFee', label: 'Project Fee' },
         { key: 'activityFees', label: 'Activity Fees' },
         { key: 'tieAndBadge', label: 'Tie & Badge' },
         { key: 'academicSupport', label: 'Academic Support' },
-        { key: 'pta', label: 'PTA' }
+        { key: 'pta', label: 'PTA Levy' }
     ];
 
     const calculateArrears = (student) => {
         const feeStructure = settings.feeStructures?.find(f => f.grade === student.grade);
         if (!feeStructure) return { items: [], totalDue: 0, totalPaid: 0, balance: 0, currentYearPaid: 0 };
 
-        // Normalize selectedFees in case it's a string from Google Sheets
         let selectedKeys = student.selectedFees;
         if (typeof selectedKeys === 'string') {
             selectedKeys = selectedKeys.split(',').map(f => f.trim()).filter(f => f);
@@ -54,7 +53,7 @@ export const FeeReminder = ({ data }) => {
             .map(col => {
                 const due = Number(feeStructure[col.key]) || 0;
                 const paid = payments
-                    .filter(p => p.studentId === student.id)
+                    .filter(p => String(p.studentId) === String(student.id))
                     .reduce((sum, p) => sum + (Number(p.items?.[col.key]) || 0), 0);
                 
                 return { label: col.label, due, paid, balance: due - paid, key: col.key };
@@ -62,12 +61,12 @@ export const FeeReminder = ({ data }) => {
             .filter(item => item.due > 0 || item.paid > 0);
 
         const currentYearPaid = payments
-            .filter(p => p.studentId === student.id)
+            .filter(p => String(p.studentId) === String(student.id))
             .reduce((sum, p) => sum + Number(p.amount), 0);
 
         if (Number(student.previousArrears) > 0) {
             itemized.unshift({ 
-                label: 'Arrears Brought Forward', 
+                label: 'Balance Brought Forward', 
                 due: Number(student.previousArrears), 
                 paid: 0, 
                 balance: Number(student.previousArrears),
@@ -91,269 +90,366 @@ export const FeeReminder = ({ data }) => {
         const matchGrade = filterGrade === 'ALL' || s.grade === filterGrade;
         const matchStudent = selectedStudentId === 'ALL' || s.id === selectedStudentId;
         const finance = calculateArrears(s);
-        
-        // Filter: Those with arrears (balance > 0) 
-        // especially focused on those who haven't cleared current term/year
         const hasArrears = finance.balance > 0;
         
         return matchGrade && matchStudent && hasArrears;
     });
 
     return html`
-        <div class="space-y-6">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 no-print">
-                <div>
-                    <h2 class="text-2xl font-bold">Fee Reminders</h2>
-                    <p class="text-slate-500">Generate and print fee balance notices for parents</p>
-                </div>
-                <button onClick=${() => window.print()} class="bg-primary text-white px-6 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-200">
-                    Print All Reminders
-                </button>
-            </div>
-
-            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
-                <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Term Filter</label>
-                    <select 
-                        class="w-full p-2 bg-slate-50 rounded-lg text-sm border-0 focus:ring-2 focus:ring-blue-500 outline-none"
-                        value=${selectedTerm}
-                        onChange=${e => setSelectedTerm(e.target.value)}
-                    >
-                        <option value="ALL">Whole Year</option>
-                        <option value="T1">Term 1</option>
-                        <option value="T2">Term 2</option>
-                        <option value="T3">Term 3</option>
-                    </select>
-                </div>
-                <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Grade</label>
-                    <select 
-                        class="w-full p-2 bg-slate-50 rounded-lg text-sm border-0 focus:ring-2 focus:ring-blue-500 outline-none"
-                        value=${filterGrade}
-                        onChange=${e => { setFilterGrade(e.target.value); setSelectedStudentId('ALL'); }}
-                    >
-                        <option value="ALL">All Grades</option>
-                        ${settings.grades?.map(g => html`<option value=${g}>${g}</option>`)}
-                    </select>
-                </div>
-                <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Specific Student</label>
-                    <select 
-                        class="w-full p-2 bg-slate-50 rounded-lg text-sm border-0 focus:ring-2 focus:ring-blue-500 outline-none"
-                        value=${selectedStudentId}
-                        onChange=${e => setSelectedStudentId(e.target.value)}
-                    >
-                        <option value="ALL">All Students with Arrears</option>
-                        ${students.filter(s => filterGrade === 'ALL' || s.grade === filterGrade).map(s => html`
-                            <option value=${s.id}>${s.name} (${s.admissionNo})</option>
-                        `)}
-                    </select>
+        <div class="space-y-6 fee-reminder-container">
+            <!-- Header Section -->
+            <div class="bg-gradient-to-r from-[#7FFFD4] via-[#7FFFD4] to-[#7FFFD4] rounded-2xl p-6 text-slate-800 shadow-lg border border-[#5FD3B3] no-print">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-14 h-14 bg-white/40 rounded-xl flex items-center justify-center backdrop-blur">
+                            <span class="text-2xl">📋</span>
+                        </div>
+                        <div>
+                            <h2 class="text-2xl font-black tracking-tight text-slate-800">Fee Balance Notices</h2>
+                            <p class="text-slate-600 text-sm">Generate professional reminder letters for parents</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-3 items-center">
+                        <div class="bg-white/40 backdrop-blur px-4 py-2 rounded-xl border border-[#5FD3B3]">
+                            <p class="text-xs text-slate-600 uppercase">Students with Arrears</p>
+                            <p class="text-xl font-black text-slate-800">${filteredStudents.length}</p>
+                        </div>
+                        <button onClick=${() => window.print()} class="bg-slate-800 text-white hover:bg-slate-700 px-6 py-2 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-colors">
+                            <span>🖨️</span> Print All
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div class="space-y-8 print:space-y-0 print:grid print:grid-cols-1">
-                <style>
-                    @media print {
-                        .reminder-card {
-                            min-height: 14.5cm;
-                            width: 100% !important;
-                            padding: 1.5cm !important;
-                            border-bottom: 2px dashed #ccc !important;
-                            page-break-inside: avoid;
-                            display: flex;
-                            flex-direction: column;
-                            justify-content: flex-start;
-                            box-sizing: border-box;
-                        }
-                        .reminder-card:nth-child(2n) {
-                            border-bottom: none !important;
-                            page-break-after: always;
-                        }
-                        .reminder-card * {
-                            font-size: 11pt !important;
-                        }
-                        .reminder-card h1 { font-size: 18pt !important; }
-                        .reminder-card .text-xl { font-size: 14pt !important; }
-                        .reminder-card .text-xs { font-size: 9pt !important; }
-                        .reminder-card .text-[10px] { font-size: 8pt !important; }
-                        .reminder-card .text-[9px] { font-size: 7pt !important; }
-                        /* Force dark header background to print */
-                        .fee-reminder-thead {
-                            background-color: #1e293b !important;
-                            color: #ffffff !important;
-                            -webkit-print-color-adjust: exact !important;
-                            print-color-adjust: exact !important;
-                        }
-                        .fee-reminder-thead th {
-                            color: #ffffff !important;
-                        }
-                        /* Stamp visibility */
-                        .reminder-stamp {
-                            opacity: 0.5 !important;
-                        }
+            <!-- Filters -->
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 no-print">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Academic Term</label>
+                        <select 
+                            class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                            value=${selectedTerm}
+                            onChange=${e => setSelectedTerm(e.target.value)}
+                        >
+                            <option value="ALL">Full Academic Year</option>
+                            <option value="T1">Term 1 Only</option>
+                            <option value="T2">Term 2 Only</option>
+                            <option value="T3">Term 3 Only</option>
+                        </select>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Grade/Class</label>
+                        <select 
+                            class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                            value=${filterGrade}
+                            onChange=${e => { setFilterGrade(e.target.value); setSelectedStudentId('ALL'); }}
+                        >
+                            <option value="ALL">All Grades</option>
+                            ${settings.grades?.map(g => html`<option value=${g}>${g}</option>`)}
+                        </select>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Student</label>
+                        <select 
+                            class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                            value=${selectedStudentId}
+                            onChange=${e => setSelectedStudentId(e.target.value)}
+                        >
+                            <option value="ALL">All Students with Arrears</option>
+                            ${students.filter(s => filterGrade === 'ALL' || s.grade === filterGrade).map(s => html`
+                                <option value=${s.id}>${s.name} — ${s.admissionNo}</option>
+                            `)}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Print Styles -->
+            <style>
+                @media print {
+                    @page {
+                        size: A4 portrait;
+                        margin: 10mm;
                     }
-                </style>
-                ${filteredStudents.map(student => {
+
+                    .no-print {
+                        display: none !important;
+                    }
+
+                    /* Container */
+                    .fee-reminder-container {
+                        display: block !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+
+                    /* Full-page reminder cards */
+                    .reminder-card {
+                        display: flex !important;
+                        flex-direction: column;
+                        width: 100% !important;
+                        min-height: 277mm !important; /* A4 height (297) - 20mm total margin */
+                        padding: 0 !important;
+                        margin: 0 !important;
+                        border: none !important;
+                        page-break-after: always;
+                        page-break-inside: avoid;
+                        box-sizing: border-box;
+                        background: white !important;
+                        box-shadow: none !important;
+                    }
+
+                    .reminder-card:last-child {
+                        page-break-after: avoid;
+                    }
+
+                    /* Reset rounding and shadows for cleaner print */
+                    .reminder-card, 
+                    .reminder-card div {
+                        border-radius: 0 !important;
+                        box-shadow: none !important;
+                    }
+
+                    /* Text sizes */
+                    .reminder-card h1 { font-size: 18pt !important; }
+                    .reminder-card h2 { font-size: 13pt !important; }
+                    .reminder-card p { font-size: 11pt !important; }
+                    .reminder-card table { font-size: 10pt !important; }
+
+                    /* Force colors to show */
+                    .print-header-bg {
+                        background-color: #f1f5f9 !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                        color: #000 !important;
+                    }
+
+                    .bg-blue-50 {
+                        background-color: #eff6ff !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+                    
+                    .bg-red-50 {
+                        background-color: #fef2f2 !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+
+                    .bg-slate-800 {
+                        background-color: #1e293b !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                        color: white !important;
+                    }
+
+                    .text-red-600 {
+                        color: #dc2626 !important;
+                        -webkit-print-color-adjust: exact !important;
+                    }
+
+                    .text-green-600 {
+                        color: #16a34a !important;
+                        -webkit-print-color-adjust: exact !important;
+                    }
+                }
+            </style>
+
+            <!-- Fee Reminder Cards -->
+            <div class="space-y-6">
+                ${filteredStudents.length === 0 && html`
+                    <div class="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-16 text-center">
+                        <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <span class="text-4xl">✓</span>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-700 mb-2">All Fees Clear!</h3>
+                        <p class="text-slate-400">No students with outstanding balances in the selected filters.</p>
+                    </div>
+                `}
+                
+                ${filteredStudents.map((student, idx) => {
                     const finance = calculateArrears(student);
+                    const dueItems = finance.items.filter(item => {
+                        if (selectedTerm === 'ALL') return true;
+                        const termKey = selectedTerm.toLowerCase();
+                        return item.key === 'prev' || !['t1', 't2', 't3'].includes(item.key) || item.key === termKey;
+                    });
+                    
                     return html`
-                        <div class="bg-white p-3 sm:p-8 rounded-2xl border border-slate-100 shadow-sm print:shadow-none print:border-0 print:p-0 print:mb-0 page-break reminder-card overflow-hidden">
-                            <!-- Header -->
-                            <div class="flex flex-col sm:flex-row justify-between items-center sm:items-end gap-2 sm:gap-4 border-b-2 border-slate-900 pb-4 mb-4 w-full">
-                                <div class="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-center sm:text-left">
-                                    <img src="${settings.schoolLogo}" class="w-12 h-12 sm:w-20 sm:h-20 object-contain" />
-                                    <div>
-                                        <h1 class="text-base sm:text-2xl font-black uppercase text-slate-900 leading-tight">${settings.schoolName}</h1>
-                                        <p class="text-[8px] sm:text-[10px] font-bold text-blue-600 uppercase tracking-widest">Excellence in Education</p>
+                        <div class="reminder-card bg-white rounded-2xl shadow-sm overflow-hidden">
+                            <!-- Professional Header -->
+                            <div class="print-header-bg bg-slate-50 text-slate-800 p-6 border-b border-slate-200">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-4">
+                                        ${settings.schoolLogo && html`
+                                            <img src="${settings.schoolLogo}" class="w-16 h-16 rounded-lg object-contain bg-white p-1" />
+                                        `}
+                                        <div>
+                                            <h1 class="text-xl font-black uppercase tracking-wider text-slate-800">${settings.schoolName || 'SCHOOL NAME'}</h1>
+                                            <p class="text-xs text-slate-600 font-medium uppercase tracking-widest">${settings.schoolAddress || ''}</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="bg-white/40 backdrop-blur px-4 py-2 rounded-lg border border-slate-300 print:bg-white">
+                                            <p class="text-xs text-slate-600 uppercase font-bold">Notice Date</p>
+                                            <p class="font-bold text-slate-800">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="text-center sm:text-right hidden sm:block">
-                                    <h1 class="text-base sm:text-lg font-black uppercase text-slate-700">Fee Statement</h1>
-                                    <p class="text-[9px] sm:text-[10px] font-bold text-slate-500 leading-tight max-w-[250px] sm:ml-auto">${settings.schoolAddress}</p>
-                                </div>
-                            </div>
-                            <div class="flex justify-center mb-4 sm:mb-6 w-full">
-                                <div class="w-full text-center" style="print-color-adjust:exact; -webkit-print-color-adjust:exact;">
-                                    <div style="border-top: 2px solid #0f172a; margin-bottom: 4px;"></div>
-                                    <p class="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-slate-900 py-1"
-                                       style="color:#0f172a; letter-spacing:0.12em;">
-                                        Official Fee Balance Notice${selectedTerm !== 'ALL' ? ` — ${selectedTerm}` : ''} &nbsp;•&nbsp; ${settings.academicYear}
-                                    </p>
-                                    <div style="border-top: 2px solid #0f172a; margin-top: 4px;"></div>
-                                </div>
                             </div>
 
-                            <!-- Student Info -->
-                            <div class="grid grid-cols-2 gap-4 sm:gap-8 mb-4">
-                                <div class="space-y-0.5 sm:space-y-1">
-                                    <p class="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase">Parent/Guardian of:</p>
-                                    <p class="text-sm sm:text-xl font-black text-blue-800">${student.name}</p>
-                                    <p class="text-[10px] sm:text-xs font-bold text-slate-600">${student.grade} - ${student.stream || 'No Stream'}</p>
-                                    <p class="text-[10px] sm:text-xs font-mono text-slate-500">Adm No: ${student.admissionNo}</p>
-                                </div>
-                                <div class="text-right space-y-0.5 sm:space-y-1">
-                                    <p class="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase">Date of Notice</p>
-                                    <p class="text-[10px] sm:text-sm font-bold">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                                </div>
+                            <!-- Notice Title -->
+                            <div class="bg-white border-b border-slate-200 py-3 px-6">
+                                <h2 class="text-center font-black text-slate-800 uppercase tracking-widest text-sm">
+                                    📨 Official Fee Balance Notice 
+                                    ${selectedTerm !== 'ALL' ? `— ${selectedTerm}` : ''}
+                                    <span class="mx-2 text-slate-300">|</span> 
+                                    ${settings.academicYear || '2025/2026'}
+                                </h2>
                             </div>
 
-                            <p class="text-[10px] sm:text-sm text-slate-700 mb-4 sm:mb-6 leading-tight">
-                                Dear Parent, this is to kindly remind you of the outstanding school fee balance. 
-                                Below is a detailed account status breakdown:
-                            </p>
+                            <!-- Student & Amount Details -->
+                            <div class="p-6 flex-grow">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                    <!-- Student Info -->
+                                    <div class="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold">👤</span>
+                                            <p class="text-xs font-bold text-blue-600 uppercase">Student Details</p>
+                                        </div>
+                                        <p class="text-lg font-black text-slate-800 mb-1">${student.name}</p>
+                                        <div class="grid grid-cols-2 gap-2 text-sm">
+                                            <div>
+                                                <p class="text-xs text-slate-400">Grade</p>
+                                                <p class="font-bold text-slate-700">${student.grade} ${student.stream || ''}</p>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs text-slate-400">Admission No.</p>
+                                                <p class="font-bold text-slate-700 font-mono">${student.admissionNo}</p>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                            <!-- Breakdown Table -->
-                            <div class="border border-slate-900 rounded-lg overflow-x-auto no-scrollbar mb-4 sm:mb-6 w-full max-w-full">
-                                <table class="w-full text-xs sm:text-sm">
-                                    <thead class="bg-slate-900 text-white fee-reminder-thead" style="print-color-adjust:exact; -webkit-print-color-adjust:exact; background-color:#1e293b; color:#fff;">
-                                        <tr>
-                                            <th class="p-1.5 sm:p-3 text-left uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Description</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Due</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Paid</th>
-                                            <th class="p-1.5 sm:p-3 text-right uppercase text-[7px] sm:text-[10px] font-black" style="color:#fff;">Bal</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-200">
-                                        ${finance.items
-                                            .filter(item => {
-                                                if (selectedTerm === 'ALL') return true;
-                                                const termKey = selectedTerm.toLowerCase();
-                                                return item.key === 'prev' || !['t1', 't2', 't3'].includes(item.key) || item.key === termKey;
-                                            })
-                                            .map(item => html`
+                                    <!-- Balance Summary -->
+                                    <div class="bg-red-50 rounded-xl p-4 border border-red-100">
+                                        <div class="flex items-center gap-2 mb-3">
+                                            <span class="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center text-white font-bold">💰</span>
+                                            <p class="text-xs font-bold text-red-600 uppercase">Outstanding Balance</p>
+                                        </div>
+                                        <p class="text-3xl font-black text-red-600 mb-2">${settings.currency} ${finance.balance.toLocaleString()}</p>
+                                        <div class="grid grid-cols-2 gap-2 text-sm">
+                                            <div>
+                                                <p class="text-xs text-slate-400">Total Due</p>
+                                                <p class="font-bold text-slate-700">${settings.currency} ${finance.totalDue.toLocaleString()}</p>
+                                            </div>
+                                            <div>
+                                                <p class="text-xs text-slate-400">Amount Paid</p>
+                                                <p class="font-bold text-green-600">${settings.currency} ${finance.totalPaid.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Fee Breakdown Table -->
+                                <div class="border border-slate-200 rounded-xl overflow-hidden mb-6">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-slate-800 text-white">
                                             <tr>
-                                                <td class="p-1.5 sm:p-2 font-bold text-[9px] sm:text-xs">${item.label}</td>
-                                                <td class="p-1.5 sm:p-2 text-right font-mono text-[9px] sm:text-xs">${item.due.toLocaleString()}</td>
-                                                <td class="p-1.5 sm:p-2 text-right font-mono text-green-600 text-[9px] sm:text-xs">${item.paid.toLocaleString()}</td>
-                                                <td class="p-1.5 sm:p-2 text-right font-black text-[9px] sm:text-xs ${item.balance > 0 ? 'text-red-600' : 'text-slate-400'}">
-                                                    ${item.balance.toLocaleString()}
-                                                </td>
+                                                <th class="p-3 text-left font-bold text-xs uppercase">Fee Item</th>
+                                                <th class="p-3 text-right font-bold text-xs uppercase">Amount Due</th>
+                                                <th class="p-3 text-right font-bold text-xs uppercase">Amount Paid</th>
+                                                <th class="p-3 text-right font-bold text-xs uppercase">Balance</th>
                                             </tr>
-                                        `)}
-                                    </tbody>
-                                    <tfoot class="bg-slate-50 border-t border-slate-900">
-                                        <tr>
-                                            <td class="p-1.5 sm:p-4 font-black uppercase text-[7px] sm:text-[10px]">TOTAL ARREARS</td>
-                                            <td class="p-1.5 sm:p-4 text-right font-bold text-[8px] sm:text-xs">${finance.totalDue.toLocaleString()}</td>
-                                            <td class="p-1.5 sm:p-4 text-right font-bold text-green-600 text-[8px] sm:text-xs">${finance.totalPaid.toLocaleString()}</td>
-                                            <td class="p-1.5 sm:p-4 text-right font-black text-[10px] sm:text-xl text-red-600 whitespace-nowrap">
-                                                ${settings.currency} ${finance.balance.toLocaleString()}
-                                            </td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100">
+                                            ${dueItems.map(item => html`
+                                                <tr class="${item.balance > 0 ? 'bg-red-50/30' : 'bg-white'}">
+                                                    <td class="p-3 font-medium">${item.label}</td>
+                                                    <td class="p-3 text-right font-mono">${item.due.toLocaleString()}</td>
+                                                    <td class="p-3 text-right font-mono text-green-600">${item.paid.toLocaleString()}</td>
+                                                    <td class="p-3 text-right font-bold font-mono ${item.balance > 0 ? 'text-red-600' : 'text-slate-400'}">
+                                                        ${item.balance > 0 ? item.balance.toLocaleString() : '-'}
+                                                    </td>
+                                                </tr>
+                                            `)}
+                                        </tbody>
+                                        <tfoot class="bg-slate-50 font-bold border-t border-slate-200">
+                                            <tr>
+                                                <td class="p-3 text-left uppercase text-xs">Total</td>
+                                                <td class="p-3 text-right">${finance.totalDue.toLocaleString()}</td>
+                                                <td class="p-3 text-right text-green-600">${finance.totalPaid.toLocaleString()}</td>
+                                                <td class="p-3 text-right text-red-600 text-lg">${finance.balance.toLocaleString()}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
 
-                            <!-- Footer/Sign-off -->
-                            <div class="space-y-6 pt-4">
-                                <p class="text-xs text-slate-600 italic">
-                                    Please clear the outstanding balance of <b>${settings.currency} ${finance.balance.toLocaleString()}</b> as soon as possible to ensure 
-                                    uninterrupted learning for the student. If payment has been made recently, kindly disregard this notice.
-                                </p>
+                                <!-- Urgent Notice -->
+                                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 print:bg-white print:border-slate-300">
+                                    <p class="text-sm text-amber-900 leading-relaxed">
+                                        <strong class="font-bold">Dear Parent/Guardian,</strong><br />
+                                        This is a friendly reminder that there is an outstanding balance of 
+                                        <strong class="text-lg text-red-600 font-black">${settings.currency} ${finance.balance.toLocaleString()}</strong> 
+                                        on your child's school fees account. Please arrange payment at your earliest convenience to avoid interruption of learning services.
+                                    </p>
+                                </div>
 
-                                <!-- Payment Options -->
+                                <!-- Payment Methods -->
                                 ${(settings.bankName || settings.mpesaPaybill || settings.airtelPaybill) && html`
-                                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 mt-4">
-                                        <p class="text-[9px] font-black uppercase text-slate-500 mb-2">Payment Options</p>
-                                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[9px]">
+                                    <div class="bg-slate-50 rounded-xl p-4 mb-4 border border-slate-200 print:bg-white print:border-slate-300">
+                                        <p class="text-xs font-bold text-slate-500 uppercase mb-3">💳 Official Payment Channels</p>
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                                             ${settings.bankName && html`
-                                                <div class="flex items-start gap-2">
-                                                    <span class="text-green-600">🏦</span>
-                                                    <div>
-                                                        <p class="font-bold text-slate-700">${settings.bankName}</p>
-                                                        <p class="text-slate-500">A/C No: ${settings.bankAccount || 'N/A'}</p>
-                                                    </div>
+                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
+                                                    <p class="font-bold text-slate-700 text-sm">🏦 Bank Info</p>
+                                                    <p class="text-xs text-slate-600 font-bold mt-1">${settings.bankName}</p>
+                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.bankAccount || 'N/A'}</p>
                                                 </div>
                                             `}
                                             ${settings.mpesaPaybill && html`
-                                                <div class="flex items-start gap-2">
-                                                    <span class="text-green-600">📱</span>
-                                                    <div>
-                                                        <p class="font-bold text-slate-700">M-Pesa Paybill</p>
-                                                        <p class="text-slate-500">${settings.mpesaPaybill} (A/C: ${settings.mpesaAccountName || 'School Fees'})</p>
-                                                    </div>
+                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
+                                                    <p class="font-bold text-slate-700 text-sm">📱 M-Pesa</p>
+                                                    <p class="text-xs text-slate-600 font-bold mt-1">Paybill: ${settings.mpesaPaybill}</p>
+                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.mpesaAccountName || 'School Fees'}</p>
                                                 </div>
                                             `}
                                             ${settings.airtelPaybill && html`
-                                                <div class="flex items-start gap-2">
-                                                    <span class="text-red-600">📱</span>
-                                                    <div>
-                                                        <p class="font-bold text-slate-700">Airtel Money</p>
-                                                        <p class="text-slate-500">${settings.airtelPaybill} (A/C: ${settings.airtelAccountName || 'School Fees'})</p>
-                                                    </div>
+                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
+                                                    <p class="font-bold text-slate-700 text-sm">📱 Airtel</p>
+                                                    <p class="text-xs text-slate-600 font-bold mt-1">Paybill: ${settings.airtelPaybill}</p>
+                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.airtelAccountName || 'School Fees'}</p>
                                                 </div>
                                             `}
                                         </div>
                                     </div>
                                 `}
-                                
-                                <div class="flex justify-between items-end pt-4 print:pt-2">
-                                    <div class="text-center w-48">
-                                        <div class="h-10 flex items-center justify-center mb-1">
-                                            ${settings.clerkSignature && html`<img src="${settings.clerkSignature}" class="h-full object-contain" />`}
+                            </div>
+
+                            <!-- Signatures -->
+                            <div class="p-6 border-t border-slate-200 bg-slate-50 print:bg-white text-slate-800">
+                                <div class="flex justify-between items-end">
+                                    <div class="text-center">
+                                        <div class="h-16 flex items-end justify-center mb-2">
+                                            ${settings.clerkSignature && html`<img src="${settings.clerkSignature}" class="h-14 object-contain" />`}
                                         </div>
-                                        <div class="h-0.5 bg-slate-900 mb-1 w-full"></div>
-                                        <p class="text-[9px] font-black uppercase text-slate-500">Accounts Dept</p>
+                                        <div class="w-40 h-0.5 bg-slate-900 mb-1"></div>
+                                        <p class="text-[10px] font-bold uppercase text-slate-800">Authorized Signatory</p>
+                                        <p class="text-[9px] text-slate-500">Accounts Department</p>
                                     </div>
-                                    <div class="text-center w-48 flex flex-col items-center">
-                                        <div class="w-16 h-16 reminder-stamp" style="opacity:0.5;">
-                                            <img src="${settings.schoolLogo}" class="w-full h-full object-contain" />
+                                    <div class="text-center">
+                                        <div class="w-16 h-16 opacity-30 flex items-center justify-center mb-2">
+                                            ${settings.schoolLogo && html`<img src="${settings.schoolLogo}" class="w-full h-full object-contain filter grayscale" />`}
                                         </div>
-                                        <p class="text-[9px] font-black uppercase text-slate-500">Official Stamp</p>
+                                        <div class="w-32 h-0.5 bg-slate-900 mb-1"></div>
+                                        <p class="text-[10px] font-bold uppercase text-slate-800">School Stamp</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     `;
                 })}
-
-                ${filteredStudents.length === 0 && html`
-                    <div class="bg-white p-20 rounded-2xl border border-dashed border-slate-200 text-center">
-                        <span class="text-5xl mb-4 block">✅</span>
-                        <h3 class="text-lg font-bold text-slate-700">No Arrears Found</h3>
-                        <p class="text-slate-400">All students in the selected filter have cleared their fees.</p>
-                    </div>
-                `}
             </div>
         </div>
     `;
 };
+
