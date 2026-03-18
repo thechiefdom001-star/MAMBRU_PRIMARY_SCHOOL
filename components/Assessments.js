@@ -371,6 +371,76 @@ export const Assessments = ({ data, setData }) => {
                     </div>
                 `}
             </div>
+
+            <div class="space-y-3 mt-8">
+                <h3 class="text-lg font-bold">Assessment Records (All Entries)</h3>
+                <p class="text-xs text-slate-500">View, edit, and delete all assessment entries</p>
+                
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200">
+                                <th class="px-4 py-2 text-left font-bold text-slate-600">Student Name</th>
+                                <th class="px-4 py-2 text-left font-bold text-slate-600">Subject</th>
+                                <th class="px-4 py-2 text-left font-bold text-slate-600">Term</th>
+                                <th class="px-4 py-2 text-left font-bold text-slate-600">Exam Type</th>
+                                <th class="px-4 py-2 text-center font-bold text-slate-600">Score</th>
+                                <th class="px-4 py-2 text-center font-bold text-slate-600">Level</th>
+                                <th class="px-4 py-2 text-center font-bold text-slate-600">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            ${data.assessments.length === 0 ? html`
+                                <tr>
+                                    <td colspan="7" class="px-4 py-6 text-center text-slate-400">No assessment records yet</td>
+                                </tr>
+                            ` : data.assessments.map(assessment => {
+                                const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+                                return html`
+                                    <tr key=${assessment.id} class="hover:bg-blue-50">
+                                        <td class="px-4 py-3">${student?.name || 'Unknown'}</td>
+                                        <td class="px-4 py-3">${assessment.subject}</td>
+                                        <td class="px-4 py-3">${assessment.term}</td>
+                                        <td class="px-4 py-3">${assessment.examType}</td>
+                                        <td class="px-4 py-3 text-center font-bold">
+                                            <input 
+                                                type="number" 
+                                                min="0" 
+                                                max="100"
+                                                value=${assessment.score}
+                                                onChange=${(e) => {
+                                                    const updated = {
+                                                        ...assessment,
+                                                        score: Number(e.target.value),
+                                                        level: Storage.getGradeInfo(Number(e.target.value)).level
+                                                    };
+                                                    const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
+                                                    setData({ ...data, assessments: updatedAssessments });
+                                                    syncToGoogle([updated]);
+                                                }}
+                                                class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">${assessment.level}</span>
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <button 
+                                                onClick=${() => deleteAssessment(assessment.id)}
+                                                title="Delete assessment"
+                                                class="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded text-xs font-bold"
+                                            >
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-400 mt-2">${data.assessments.length} total records</p>
+            </div>
         </div>
     `;
 };
