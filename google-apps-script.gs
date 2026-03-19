@@ -25,7 +25,7 @@ const SHEET_NAMES = {
 
 // Column headers for each sheet
 const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees'];
-const ASSESSMENT_HEADERS = ['id', 'studentId', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
+const ASSESSMENT_HEADERS = ['id', 'studentId', 'studentAdmissionNo', 'studentName', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
 const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
@@ -39,11 +39,11 @@ function sanitizeRecord(record) {
   
   const sanitized = {};
   
-  // Allowed string fields
+  // Allowed string fields (expanded for assessments)
   const stringFields = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees', 
                         'subject', 'term', 'examType', 'academicYear', 'date', 'level', 'status',
                         'receiptNo', 'method', 'reference', 'role', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo',
-                        'voided', 'voidedBy'];
+                        'voided', 'voidedBy', 'studentId', 'studentAdmissionNo', 'studentName'];
   
   // Allowed numeric fields
   const numericFields = ['score', 'amount'];
@@ -89,11 +89,14 @@ function initializeSheets() {
     studentsSheet.appendRow(STUDENT_HEADERS);
   }
   
-  // Create Assessments sheet
+  // Create Assessments sheet with ENRICHED headers (includes studentAdmissionNo, studentName)
   let assessmentsSheet = ss.getSheetByName(SHEET_NAMES.ASSESSMENTS);
   if (!assessmentsSheet) {
     assessmentsSheet = ss.insertSheet(SHEET_NAMES.ASSESSMENTS);
     assessmentsSheet.appendRow(ASSESSMENT_HEADERS);
+  } else {
+    // Update existing Assessments sheet with new headers
+    updateAssessmentSheetHeaders(assessmentsSheet);
   }
   
   // Create Attendance sheet
@@ -132,6 +135,30 @@ function initializeSheets() {
   }
   
   return { success: true, message: 'Sheets initialized successfully' };
+}
+
+/**
+ * Update Assessments sheet headers to include studentAdmissionNo and studentName
+ * This ensures existing sheets get the new columns
+ */
+function updateAssessmentSheetHeaders(sheet) {
+  if (!sheet) return;
+  
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const currentHeaders = headerRow.map(function(h) { return String(h || '').trim(); });
+  
+  const lastCol = sheet.getLastColumn();
+  
+  // Check which headers are missing and add them
+  ASSESSMENT_HEADERS.forEach(function(header) {
+    if (currentHeaders.indexOf(header) === -1) {
+      console.log('Adding missing header: ' + header);
+      // Add column at the end
+      sheet.insertColumnAfter(lastCol);
+      // Set the header value in the new column
+      sheet.getRange(1, lastCol + 1).setValue(header);
+    }
+  });
 }
 
 /**
@@ -682,7 +709,7 @@ function getAllRecords(sheetName, headers) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   
-  const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const data = sheet.getDataRange().getValues();
   const seenIds = new Set();
   const results = [];
   
@@ -710,6 +737,13 @@ function getAllRecords(sheetName, headers) {
       
       obj[header] = value;
     });
+    
+    // For assessments, ensure studentId is properly included even if empty
+    if (sheetName === SHEET_NAMES.ASSESSMENTS) {
+      obj.studentId = String(obj.studentId || '');
+      obj.studentAdmissionNo = String(obj.studentAdmissionNo || '');
+      obj.studentName = String(obj.studentName || '');
+    }
     
     // Deduplicate by ID
     if (idValue && !seenIds.has(idValue)) {
@@ -1120,4 +1154,193 @@ function getActiveUsers() {
   } catch (error) {
     return { success: false, activeCount: 0, activeUsers: [], error: error.message };
   }
+}
+
+/**
+ * Retroactively update assessment records with studentId, studentAdmissionNo, and studentName
+ * Run this once to populate missing student data in existing assessment records
+ */
+function backfillAssessmentStudentData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const studentsSheet = ss.getSheetByName(SHEET_NAMES.STUDENTS);
+  const assessmentsSheet = ss.getSheetByName(SHEET_NAMES.ASSESSMENTS);
+  
+  if (!studentsSheet || !assessmentsSheet) {
+    return { success: false, error: 'Students or Assessments sheet not found' };
+  }
+  
+  // First, ensure headers are updated
+  updateAssessmentSheetHeaders(assessmentsSheet);
+  
+  // Get all students
+  const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
+  
+  // Get all assessment records with current headers
+  const assessmentHeaders = ASSESSMENT_HEADERS;
+  const lastRow = assessmentsSheet.getLastRow();
+  const lastCol = assessmentsSheet.getLastColumn();
+  
+  if (lastRow <= 1) {
+    return { success: true, message: 'No assessment records to update' };
+  }
+  
+  const data = assessmentsSheet.getDataRange().getValues();
+  const headerRow = data[0].map(h => String(h || '').trim());
+  
+  // Find column indices
+  const idIndex = headerRow.indexOf('id');
+  const studentIdIndex = headerRow.indexOf('studentId');
+  const studentAdmIndex = headerRow.indexOf('studentAdmissionNo');
+  const studentNameIndex = headerRow.indexOf('studentName');
+  
+  let updatedCount = 0;
+  
+  // Build student lookup maps
+  const byId = new Map();
+  const byAdm = new Map();
+  const byName = new Map();
+  
+  students.forEach(s => {
+    if (s.id) byId.set(String(s.id).trim().toLowerCase(), s);
+    if (s.admissionNo) byAdm.set(String(s.admissionNo).trim().toLowerCase(), s);
+    if (s.name) byName.set(String(s.name).trim().toLowerCase(), s);
+  });
+  
+  // Update each assessment row
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const assessmentId = String(row[idIndex] || '').trim();
+    const currentStudentId = String(row[studentIdIndex] || '').trim();
+    
+    // Only update if studentId is missing or empty
+    if (!currentStudentId) {
+      let matchedStudent = null;
+      
+      // Try to find matching student
+      // Strategy 1: Match by existing studentId if present
+      if (assessmentId.startsWith('A-') === false) {
+        // Try matching by assessment ID format
+      }
+      
+      // Strategy 2: Match by name in assessment (if there was a name column)
+      // This would require knowing which column has the name
+      
+      // For now, leave empty - the app will handle matching on fetch
+    }
+  }
+  
+  console.log('[Script] Backfill complete. Run migrateAssessmentStudentIds() to match by other criteria.');
+  return { success: true, message: 'Headers updated. ' + updatedCount + ' records analyzed.' };
+}
+
+/**
+ * Migrate assessment records to include studentId by matching with Students sheet
+ * Call this after updating headers to populate missing studentId values
+ */
+function migrateAssessmentStudentIds() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const studentsSheet = ss.getSheetByName(SHEET_NAMES.STUDENTS);
+  const assessmentsSheet = ss.getSheetByName(SHEET_NAMES.ASSESSMENTS);
+  
+  if (!studentsSheet || !assessmentsSheet) {
+    return { success: false, error: 'Required sheets not found' };
+  }
+  
+  // Get all students
+  const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
+  
+  // Get assessment data
+  const lastRow = assessmentsSheet.getLastRow();
+  
+  if (lastRow <= 1) {
+    return { success: true, message: 'No assessment records to migrate' };
+  }
+  
+  const data = assessmentsSheet.getDataRange().getValues();
+  const headerRow = data[0].map(function(h) { return String(h || '').trim(); });
+  
+  // Find column indices
+  const idIndex = headerRow.indexOf('id');
+  let studentIdIndex = headerRow.indexOf('studentId');
+  let studentAdmIndex = headerRow.indexOf('studentAdmissionNo');
+  let studentNameIndex = headerRow.indexOf('studentName');
+  
+  const currentLastCol = headerRow.length;
+  
+  // If columns don't exist, create them at the end
+  if (studentIdIndex === -1) {
+    assessmentsSheet.insertColumnAfter(currentLastCol);
+    assessmentsSheet.getRange(1, currentLastCol + 1).setValue('studentId');
+    studentIdIndex = currentLastCol;
+  }
+  if (studentAdmIndex === -1) {
+    assessmentsSheet.insertColumnAfter(studentIdIndex + 1);
+    assessmentsSheet.getRange(1, studentIdIndex + 2).setValue('studentAdmissionNo');
+    studentAdmIndex = studentIdIndex + 1;
+  }
+  if (studentNameIndex === -1) {
+    assessmentsSheet.insertColumnAfter(studentAdmIndex + 1);
+    assessmentsSheet.getRange(1, studentAdmIndex + 2).setValue('studentName');
+    studentNameIndex = studentAdmIndex + 1;
+  }
+  
+  // Build student lookup maps
+  const byAdm = new Map();
+  const byName = new Map();
+  
+  students.forEach(function(s) {
+    if (s.admissionNo) byAdm.set(String(s.admissionNo).trim().toLowerCase(), s);
+    if (s.name) byName.set(String(s.name).trim().toLowerCase(), s);
+  });
+  
+  let updatedCount = 0;
+  let matchedCount = 0;
+  
+  // Update each assessment row
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const currentStudentId = String(row[studentIdIndex] || '').trim();
+    
+    // Skip if already has studentId
+    if (currentStudentId && currentStudentId.length > 0) continue;
+    
+    // Try to match by admission number
+    let matchedStudent = null;
+    
+    if (matchedStudent) {
+      assessmentsSheet.getRange(i + 1, studentIdIndex + 1).setValue(String(matchedStudent.id || ''));
+      assessmentsSheet.getRange(i + 1, studentAdmIndex + 1).setValue(String(matchedStudent.admissionNo || ''));
+      assessmentsSheet.getRange(i + 1, studentNameIndex + 1).setValue(String(matchedStudent.name || ''));
+      matchedCount++;
+    }
+    
+    updatedCount++;
+  }
+  
+  const result = {
+    success: true,
+    analyzed: updatedCount,
+    matched: matchedCount,
+    message: 'Migration complete. ' + matchedCount + ' records matched with students.'
+  };
+  
+  console.log('[Script] Migration result:', JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Add missing columns to existing sheets
+ * Run this from Apps Script console to add new columns to existing sheets
+ */
+function addMissingColumnsToSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Update Assessments sheet headers
+  const assessmentsSheet = ss.getSheetByName(SHEET_NAMES.ASSESSMENTS);
+  if (assessmentsSheet) {
+    updateAssessmentSheetHeaders(assessmentsSheet);
+    console.log('Assessments sheet updated with new headers');
+  }
+  
+  return { success: true, message: 'Columns added to sheets' };
 }

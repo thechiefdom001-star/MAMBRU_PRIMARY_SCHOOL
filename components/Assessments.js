@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
@@ -17,6 +17,53 @@ export const Assessments = ({ data, setData }) => {
 
     const streams = data?.settings?.streams || [];
     const subjects = Storage.getSubjectsForGrade(selectedGrade);
+
+    // Create a robust student lookup map - rebuild when data.students changes
+    const studentLookup = useMemo(() => {
+        const map = new Map();
+        if (data?.students) {
+            data.students.forEach(s => {
+                // Key by ID (both string and number variants)
+                map.set(String(s.id), s);
+                map.set(String(Number(s.id)), s);
+                // Also key by admissionNo for Google Sheet data matching
+                if (s.admissionNo) {
+                    map.set(String(s.admissionNo).toLowerCase().trim(), s);
+                    map.set(String(s.admissionNo).toUpperCase().trim(), s);
+                }
+            });
+        }
+        return map;
+    }, [data?.students]);
+
+    // Helper function to find student for an assessment
+    const findStudentForAssessment = (assessment) => {
+        // Try various ID formats
+        let student = studentLookup.get(String(assessment.studentId));
+        if (student) return student;
+        
+        student = studentLookup.get(String(Number(assessment.studentId)));
+        if (student) return student;
+        
+        // Try matching by admissionNo stored in assessment (if synced from another device)
+        if (assessment.studentAdmissionNo) {
+            student = studentLookup.get(String(assessment.studentAdmissionNo).toLowerCase().trim());
+            if (student) return student;
+            student = studentLookup.get(String(assessment.studentAdmissionNo).toUpperCase().trim());
+            if (student) return student;
+        }
+        
+        // Try matching by studentName if available
+        if (assessment.studentName) {
+            const nameLower = assessment.studentName.toLowerCase().trim();
+            student = data?.students?.find(s => 
+                s.name && s.name.toLowerCase().trim() === nameLower
+            );
+            if (student) return student;
+        }
+        
+        return null;
+    };
 
     useEffect(() => {
         if (!subjects.includes(selectedSubject)) {
@@ -98,14 +145,20 @@ export const Assessments = ({ data, setData }) => {
         
         try {
             googleSheetSync.setSettings(data.settings);
-            const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+            googleSheetSync.setStudents(data.students || []);
+            
+            const student = (data.students || []).find(s => 
+                String(s.id) === String(assessment.studentId) || 
+                String(s.admissionNo) === String(assessment.studentId)
+            );
             const enriched = {
                 ...assessment,
+                studentId: String(student?.id || assessment.studentId || ''),
+                studentAdmissionNo: student?.admissionNo || assessment.studentAdmissionNo || '',
                 studentName: student?.name || 'Unknown',
                 grade: student?.grade || assessment.grade || ''
             };
             
-            // Try to push as new record first
             const result = await googleSheetSync.pushAssessment(enriched);
             if (result.success) {
                 console.log('Assessment synced to Google:', assessment.id);
@@ -114,7 +167,7 @@ export const Assessments = ({ data, setData }) => {
             }
         } catch (err) {
             console.warn('Assessment sync error:', err.message);
-            throw err; // Re-throw so caller knows it failed
+            throw err;
         }
     };
     
@@ -127,6 +180,8 @@ export const Assessments = ({ data, setData }) => {
         setIsSyncing(true);
         setSyncStatus('Syncing to Google Sheet...');
         googleSheetSync.setSettings(data.settings);
+        // Set students list for enrichment in sync service
+        googleSheetSync.setStudents(data.students || []);
         
         try {
             let successCount = 0;
@@ -134,10 +189,17 @@ export const Assessments = ({ data, setData }) => {
             
             for (const assessment of assessments) {
                 try {
-                    const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+                    // Enrich assessment with student data before syncing
+                    const student = (data.students || []).find(s => 
+                        String(s.id) === String(assessment.studentId) || 
+                        String(s.admissionNo) === String(assessment.studentId)
+                    );
                     const enriched = {
                         ...assessment,
-                        studentName: student?.name || 'Unknown',
+                        // Ensure studentId is always a string
+                        studentId: String(student?.id || assessment.studentId || ''),
+                        studentAdmissionNo: student?.admissionNo || assessment.studentAdmissionNo || '',
+                        studentName: student?.name || assessment.studentName || 'Unknown',
                         grade: student?.grade || assessment.grade || ''
                     };
                     
@@ -229,22 +291,84 @@ export const Assessments = ({ data, setData }) => {
                 // Merge assessments from Google Sheet with local data
                 const localAssessments = data.assessments || [];
                 const remoteAssessments = result.assessments || [];
+                const localStudents = data.students || [];
                 
-                // Merge, preferring newer data (by date)
+                // Merge, using robust ID matching
                 const mergedAssessments = [...localAssessments];
                 let addedCount = 0;
                 
                 remoteAssessments.forEach(remote => {
+                    // Normalize the remote assessment
+                    const normalizedRemote = {
+                        ...remote,
+                        studentId: String(remote.studentId || ''),
+                        studentAdmissionNo: remote.studentAdmissionNo || '',
+                        studentName: remote.studentName || ''
+                    };
+                    
+                    // Check if this assessment already exists locally
                     const exists = mergedAssessments.some(a => 
-                        a.id === remote.id ||
-                        (a.studentId === remote.studentId && 
-                         a.subject === remote.subject && 
-                         a.term === remote.term && 
-                         a.examType === remote.examType &&
-                         a.academicYear === remote.academicYear)
+                        a.id === normalizedRemote.id ||
+                        // Match by composite key with flexible ID matching
+                        ((
+                            String(a.studentId) === String(normalizedRemote.studentId) ||
+                            (normalizedRemote.studentAdmissionNo && String(a.studentAdmissionNo || '').toLowerCase() === String(normalizedRemote.studentAdmissionNo || '').toLowerCase()) ||
+                            (normalizedRemote.studentName && a.studentName && normalizedRemote.studentName.toLowerCase().trim() === a.studentName.toLowerCase().trim())
+                        ) &&
+                         a.subject === normalizedRemote.subject && 
+                         a.term === normalizedRemote.term && 
+                         a.examType === normalizedRemote.examType &&
+                         a.academicYear === normalizedRemote.academicYear)
                     );
                     if (!exists) {
-                        mergedAssessments.push(remote);
+                        // Try to match with local students using multiple strategies
+                        let matchedStudent = null;
+                        
+                        // Strategy 1: Match by studentId
+                        if (normalizedRemote.studentId) {
+                            matchedStudent = localStudents.find(s => 
+                                String(s.id) === normalizedRemote.studentId ||
+                                String(s.id) === String(Number(normalizedRemote.studentId))
+                            );
+                        }
+                        
+                        // Strategy 2: Match by admission number
+                        if (!matchedStudent && normalizedRemote.studentAdmissionNo) {
+                            matchedStudent = localStudents.find(s => 
+                                s.admissionNo && 
+                                String(s.admissionNo).toLowerCase() === normalizedRemote.studentAdmissionNo.toLowerCase()
+                            );
+                        }
+                        
+                        // Strategy 3: Match by name
+                        if (!matchedStudent && normalizedRemote.studentName) {
+                            matchedStudent = localStudents.find(s => 
+                                s.name && 
+                                s.name.toLowerCase().trim() === normalizedRemote.studentName.toLowerCase().trim()
+                            );
+                        }
+                        
+                        // Strategy 4: Match by grade + subject + term + exam (if studentId is empty but other data matches)
+                        if (!matchedStudent && !normalizedRemote.studentId && !normalizedRemote.studentAdmissionNo) {
+                            // Try to find by exact match on other fields
+                            const existingByMatch = mergedAssessments.find(a =>
+                                a.subject === normalizedRemote.subject &&
+                                a.term === normalizedRemote.term &&
+                                a.examType === normalizedRemote.examType &&
+                                a.academicYear === normalizedRemote.academicYear
+                            );
+                            if (existingByMatch) {
+                                normalizedRemote.studentId = existingByMatch.studentId;
+                                normalizedRemote.studentAdmissionNo = existingByMatch.studentAdmissionNo || '';
+                            }
+                        }
+                        
+                        mergedAssessments.push({
+                            ...normalizedRemote,
+                            studentId: matchedStudent?.id || normalizedRemote.studentId || '',
+                            studentAdmissionNo: matchedStudent?.admissionNo || normalizedRemote.studentAdmissionNo || '',
+                            studentName: matchedStudent?.name || normalizedRemote.studentName || 'Unknown'
+                        });
                         addedCount++;
                     }
                 });
@@ -386,7 +510,9 @@ export const Assessments = ({ data, setData }) => {
                     <div class="divide-y divide-slate-50">
                         ${students.map(student => {
                             const assessment = data.assessments.find(a => 
-                                String(a.studentId) === String(student.id) && 
+                                (String(a.studentId) === String(student.id) || 
+                                 String(a.studentId) === String(student.admissionNo) ||
+                                 a.studentAdmissionNo === student.admissionNo) && 
                                 a.subject === selectedSubject && 
                                 a.term === selectedTerm && 
                                 a.examType === selectedExamType
@@ -464,10 +590,10 @@ export const Assessments = ({ data, setData }) => {
                                     <td colspan="7" class="px-4 py-6 text-center text-slate-400">No assessment records yet</td>
                                 </tr>
                             ` : data.assessments.map(assessment => {
-                                const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+                                const student = findStudentForAssessment(assessment);
                                 return html`
                                     <tr key=${assessment.id} class="hover:bg-blue-50">
-                                        <td class="px-4 py-3">${student?.name || 'Unknown'}</td>
+                                        <td class="px-4 py-3">${student?.name || assessment.studentName || 'Unknown'}</td>
                                         <td class="px-4 py-3">${assessment.subject}</td>
                                         <td class="px-4 py-3">${assessment.term}</td>
                                         <td class="px-4 py-3">${assessment.examType}</td>

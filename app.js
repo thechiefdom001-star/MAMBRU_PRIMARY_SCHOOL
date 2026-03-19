@@ -34,8 +34,22 @@ const App = () => {
     });
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-    const [selectedStudent, setSelectedStudent] = useState(null);
+    const [selectedStudentId, setSelectedStudentId] = useState(null);
     const [isAdmin, setIsAdmin] = useState(localStorage.getItem('et_is_admin') === 'true');
+    
+    // Derive selectedStudent from data.students to ensure it's always fresh
+    const selectedStudent = selectedStudentId 
+        ? (data.students || []).find(s => String(s.id) === String(selectedStudentId)) || null
+        : null;
+    
+    // Sync selectedStudentId when data.students changes (e.g., after Google sync)
+    useEffect(() => {
+        if (selectedStudentId && !selectedStudent) {
+            // Student no longer exists in data, clear selection
+            console.log('Selected student no longer found in data, clearing selection');
+            setSelectedStudentId(null);
+        }
+    }, [data.students, selectedStudentId, selectedStudent]);
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
     const [showLoginModal, setShowLoginModal] = useState(false);
@@ -390,16 +404,14 @@ const App = () => {
 
     const navigate = (v, params = null) => {
         if (params?.studentId) {
-            const student = (data.students || []).find(s => s.id === params.studentId);
-            setSelectedStudent(student);
+            setSelectedStudentId(params.studentId);
         }
         setView(v);
         setIsMobileMenuOpen(false);
     };
 
     const handleAcademicPrintSelect = (id, isBatch = false) => {
-        const student = (data.students || []).find(s => s.id === id);
-        setSelectedStudent(student);
+        setSelectedStudentId(id);
         if (isBatch) {
             setView('batch-reports');
         } else {
@@ -840,9 +852,12 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
     });
 
     const totalMarks = subjectAverages.reduce((sum, avg) => sum + (avg || 0), 0);
-    const totalPoints = subjectAverages.reduce((sum, avg) => sum + (avg !== null ? Storage.getGradeInfo(avg).points : 0), 0);
     const subjectCount = subjects.length;
-    const overallLevel = Storage.getOverallLevel(totalPoints, subjectCount);
+    // Overall level = calculated from average of subject percentages
+    const overallResult = Storage.getOverallLevel(subjectAverages.filter(a => a !== null));
+    const overallLevel = overallResult.level;
+    const overallPercentage = overallResult.percentage;
+    const overallAL = overallResult.al;
     const attendancePercentage = isFullYear
         ? Storage.getStudentAttendance(student.id, data.attendance || [])
         : Storage.getStudentAttendance(student.id, data.attendance || [], selectedTerm);
@@ -859,18 +874,12 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                 }).filter(s => s !== null);
                 return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
             });
-            const subjectPoints = {};
-            termSubjects.forEach((avg, idx) => {
-                const pts = avg !== null ? Storage.getGradeInfo(avg).points : 0;
-                subjectPoints[subjects[idx]] = pts;
-            });
-            const termPoints = termSubjects.reduce((sum, avg) => sum + (avg !== null ? Storage.getGradeInfo(avg).points : 0), 0);
-            const termLevel = Storage.getOverallLevel(termPoints, subjects.length);
+            const termOverall = Storage.getOverallLevel(termSubjects.filter(t => t !== null));
             const termAttendance = Storage.getStudentAttendance(student.id, data.attendance || [], term);
             const avgScore = termSubjects.filter(s => s !== null).length > 0
                 ? Math.round(termSubjects.reduce((a, b) => a + (b || 0), 0) / termSubjects.filter(s => s !== null).length)
                 : 0;
-            return { term, avgScore, termPoints, termLevel, termAttendance, subjectPoints };
+            return { term, avgScore, termLevel: termOverall.level, termPercentage: termOverall.percentage, termAL: termOverall.al, termAttendance };
         });
     };
 
@@ -988,24 +997,16 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
             })()
             : totalMarks}</p>
                     </div>
-                    <div class="p-2 bg-indigo-50 rounded-lg print:p-1.5 border border-indigo-100">
-                        <p class="text-[8px] text-indigo-600 font-bold uppercase">${isFullYear ? 'Avg Points' : 'Total Points'}</p>
-                        <p class="text-sm font-bold print:text-[11px]">${isFullYear
-            ? (() => {
-                const allScores = [];
-                yearSummary.forEach(ys => {
-                    subjects.forEach(subject => {
-                        const pts = ys.subjectPoints?.[subject] || 0;
-                        if (pts > 0) allScores.push(pts);
-                    });
-                });
-                if (allScores.length === 0) return '-';
-                return (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1);
-            })()
-            : totalPoints}</p>
-                    </div>
                     <div class="p-2 bg-green-50 rounded-lg print:p-1.5 border border-green-100">
-                        <p class="text-[8px] text-green-600 font-bold uppercase">Overall</p>
+                        <p class="text-[8px] text-green-600 font-bold uppercase">Overall %</p>
+                        <p class="text-sm font-bold print:text-[11px]">${overallPercentage}%</p>
+                    </div>
+                    <div class="p-2 bg-blue-50 rounded-lg print:p-1.5 border border-blue-100">
+                        <p class="text-[8px] text-blue-600 font-bold uppercase">AL</p>
+                        <p class="text-sm font-bold print:text-[11px]">${overallAL}</p>
+                    </div>
+                    <div class="p-2 bg-orange-50 rounded-lg print:p-1.5 border border-orange-100">
+                        <p class="text-[8px] text-orange-600 font-bold uppercase">Grade</p>
                         <p class="text-sm font-bold print:text-[11px]">${overallLevel}</p>
                     </div>
                     <div class="p-2 bg-purple-50 rounded-lg print:p-1.5 border border-purple-100">
@@ -1231,7 +1232,7 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                 return sum + (subScores.length > 0 ? subScores.reduce((a, b) => a + b, 0) / subScores.length : 0);
             }, 0)) || '-'}
                                         </td>
-                                        <td class="p-2 print:p-1.5 text-center border-l font-black text-blue-700 print:text-[11px]">${totalPoints}</td>
+                                        <td class="p-2 print:p-1.5 text-center border-l font-black text-blue-700 print:text-[11px]">${overallAL}</td>
                                     </tr>
                                     <tr class="bg-white print:border-black">
                                         <td class="p-2 print:p-1.5 uppercase text-[9px] text-blue-600 font-black">Mean Score Average</td>
@@ -1390,9 +1391,9 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                     <thead class="bg-slate-100">
                                         <tr>
                                             <th class="border p-2 text-left">Term</th>
-                                            <th class="border p-2 text-center">Avg Score</th>
-                                            <th class="border p-2 text-center">Total Points</th>
-                                            <th class="border p-2 text-center">Overall Level</th>
+                                            <th class="border p-2 text-center">Avg %</th>
+                                            <th class="border p-2 text-center">AL</th>
+                                            <th class="border p-2 text-center">Grade</th>
                                             <th class="border p-2 text-center">Attendance</th>
                                         </tr>
                                     </thead>
@@ -1400,14 +1401,14 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                         ${yearSummary.map(ys => html`
                                             <tr>
                                                 <td class="border p-2 font-bold">${ys.term.replace('T', 'Term ')}</td>
-                                                <td class="border p-2 text-center">${ys.avgScore}%</td>
-                                                <td class="border p-2 text-center">${ys.termPoints}</td>
+                                                <td class="border p-2 text-center">${ys.termPercentage || 0}%</td>
+                                                <td class="border p-2 text-center font-bold">${ys.termAL || '-'}</td>
                                                 <td class="border p-2 text-center">
-                                                    <span class=${`px-2 py-0.5 rounded-full text-[10px] font-bold ${ys.termLevel === 'EE' ? 'bg-green-100 text-green-700' :
-                    ys.termLevel === 'ME' ? 'bg-blue-100 text-blue-700' :
-                        ys.termLevel === 'AE' ? 'bg-yellow-100 text-yellow-700' :
-                            ys.termLevel === 'BE' ? 'bg-red-100 text-red-700' :
-                                'bg-slate-100 text-slate-500'
+                                                    <span class=${`px-2 py-0.5 rounded-full text-[10px] font-bold ${ys.termLevel.startsWith('EE') ? 'bg-green-100 text-green-700' :
+                            ys.termLevel.startsWith('ME') ? 'bg-blue-100 text-blue-700' :
+                                ys.termLevel.startsWith('AE') ? 'bg-yellow-100 text-yellow-700' :
+                                    ys.termLevel.startsWith('BE') ? 'bg-red-100 text-red-700' :
+                                        'bg-slate-100 text-slate-500'
                 }`}>
                                                         ${ys.termLevel}
                                                     </span>
@@ -1417,30 +1418,20 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                         `)}
                                         <tr class="bg-blue-50 font-bold">
                                             <td class="border p-2">YEAR AVERAGE</td>
+                                            <td class="border p-2 text-center">${overallPercentage}%</td>
+                                            <td class="border p-2 text-center">${overallAL}</td>
                                             <td class="border p-2 text-center">
-                                                ${(() => {
-                const allScores = [];
-                yearSummary.forEach(ys => {
-                    subjects.forEach(subject => {
-                        const pts = ys.subjectPoints?.[subject] || 0;
-                        if (pts > 0) allScores.push(pts);
-                    });
-                });
-                if (allScores.length === 0) return '-';
-                const avgPts = allScores.reduce((a, b) => a + b, 0) / allScores.length;
-                return Math.round(avgPts * 12.5) + '%';
-            })()}
+                                                <span class=${`px-2 py-0.5 rounded-full text-[10px] font-bold ${overallLevel.startsWith('EE') ? 'bg-green-100 text-green-700' :
+                            overallLevel.startsWith('ME') ? 'bg-blue-100 text-blue-700' :
+                                overallLevel.startsWith('AE') ? 'bg-yellow-100 text-yellow-700' :
+                                    overallLevel.startsWith('BE') ? 'bg-red-100 text-red-700' :
+                                        'bg-slate-100 text-slate-500'
+                }`}>
+                                                    ${overallLevel}
+                                                </span>
                                             </td>
-                                            <td class="border p-2 text-center">
-                                                ${(() => {
-                const allScores = [];
-                yearSummary.forEach(ys => {
-                    subjects.forEach(subject => {
-                        const pts = ys.subjectPoints?.[subject] || 0;
-                        if (pts > 0) allScores.push(pts);
-                    });
-                });
-                if (allScores.length === 0) return '-';
+                                            <td class="border p-2 text-center">-</td>
+                                        </tr>
                 return (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1);
             })()}
                                             </td>

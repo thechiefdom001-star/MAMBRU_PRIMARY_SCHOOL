@@ -36,11 +36,17 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
         const terms = filterTerm === 'FULL' ? ['T1', 'T2', 'T3'] : [filterTerm];
 
         return students.map(student => {
-            const studentAssessments = assessments.filter(a =>
-                a.studentId === student.id &&
-                terms.includes(a.term) &&
-                a.academicYear === filterYear
-            );
+            // Robust student matching - try multiple ID formats
+            const studentAssessments = assessments.filter(a => {
+                const matchById = String(a.studentId) === String(student.id);
+                const matchByAdmission = a.studentAdmissionNo && 
+                    String(a.studentAdmissionNo).toLowerCase() === String(student.admissionNo || '').toLowerCase();
+                const matchByName = a.studentName && 
+                    a.studentName.toLowerCase().trim() === student.name.toLowerCase().trim();
+                return (matchById || matchByAdmission || matchByName) &&
+                    terms.includes(a.term) &&
+                    a.academicYear === filterYear;
+            });
 
             const subjectAnalysis = subjects.map(subject => {
                 const scores = {};
@@ -69,11 +75,17 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                 : 0;
 
             const performance = Storage.getGradeInfo(overallAverage);
+            
+            // Calculate overall level from array of subject averages
+            const overallLevelResult = Storage.getOverallLevel(subjectAnalysis.map(sa => sa.average).filter(avg => avg !== null));
+            const overallLevel = `${overallLevelResult.level}`;
 
             return {
                 ...student,
                 subjectAnalysis,
                 overallAverage,
+                overallScore: overallLevelResult.al || 0,
+                overallLevel,
                 performance
             };
         }).filter(s => s.name.toLowerCase().includes(searchName.toLowerCase()));
@@ -260,7 +272,7 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                                 <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-black text-xs shrink-0">${idx + 1}</div>
                                 <div class="min-w-0">
                                     <p class="font-bold text-xs truncate">${s.name}</p>
-                                    <p class="text-[10px] font-black text-blue-200">${score}%</p>
+                                    <p class="text-[10px] font-black text-blue-200">${score}% | Score: ${s.overallScore || 0}</p>
                                 </div>
                             </div>
                         `;
@@ -296,8 +308,8 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                                     </div>
                                 </div>
                                 <div class="text-right">
-                                    <p class="text-3xl font-black text-blue-900">${score}%</p>
-                                    <p class="text-xs font-bold uppercase text-blue-600">Score</p>
+                                    <p class="text-2xl font-black text-blue-900">${score}%</p>
+                                    <p class="text-xs text-green-600 font-bold">Score: ${s.overallScore || 0} | Grade: ${s.overallLevel || '-'}</p>
                                 </div>
                             </div>
                         `;
@@ -360,11 +372,16 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                                 <td class="px-4 py-3 text-right bg-slate-50/50">
                                     <div class="flex flex-col items-end">
                                         <span class="text-sm font-black text-slate-900">${student.overallAverage}%</span>
-                                        <span class="text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${student.performance.level.startsWith('EE') ? 'bg-green-100 text-green-700' :
-                student.performance.level.startsWith('ME') ? 'bg-blue-100 text-blue-700' :
-                    student.performance.level.startsWith('AE') ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-red-100 text-red-700'
-            }">${student.performance.level}</span>
+                                        <div class="flex items-center gap-1 mt-1">
+                                            <span class="text-[9px] font-bold bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                                Score: ${student.overallScore || 0}
+                                            </span>
+                                            <span class="text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${student.overallLevel.startsWith('EE') ? 'bg-green-500 text-white' :
+                        student.overallLevel.startsWith('ME') ? 'bg-blue-500 text-white' :
+                            student.overallLevel.startsWith('AE') ? 'bg-yellow-500 text-white' :
+                                'bg-red-500 text-white'
+            }">${student.overallLevel}</span>
+                                        </div>
                                     </div>
                                 </td>
                                 <td class="px-4 py-3 text-center bg-slate-50/50 no-print">
@@ -424,7 +441,7 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                         </h3>
                         <div class="space-y-5">
                             ${['EE', 'ME', 'AE', 'BE'].map(level => {
-                const count = analysisData.filter(s => s.performance.level.startsWith(level)).length;
+                const count = analysisData.filter(s => s.overallLevel.startsWith(level)).length;
                 const pct = analysisData.length > 0 ? (count / analysisData.length) * 100 : 0;
                 const colors = {
                     EE: 'bg-green-500 border-green-600',
