@@ -32,6 +32,51 @@ const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 
 const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt'];
 
 /**
+ * Sanitize incoming records to prevent injection attacks
+ */
+function sanitizeRecord(record) {
+  if (!record || typeof record !== 'object') return {};
+  
+  const sanitized = {};
+  
+  // Allowed string fields
+  const stringFields = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees', 
+                        'subject', 'term', 'examType', 'academicYear', 'date', 'level', 'status',
+                        'receiptNo', 'method', 'reference', 'role', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo',
+                        'voided', 'voidedBy'];
+  
+  // Allowed numeric fields
+  const numericFields = ['score', 'amount'];
+  
+  stringFields.forEach(field => {
+    if (record[field] !== undefined && record[field] !== null) {
+      sanitized[field] = String(record[field]).slice(0, 500);
+    }
+  });
+  
+  numericFields.forEach(field => {
+    if (record[field] !== undefined && record[field] !== null) {
+      const num = Number(record[field]);
+      sanitized[field] = isNaN(num) ? 0 : num;
+    }
+  });
+  
+  // Preserve other fields as-is (objects, arrays)
+  Object.keys(record).forEach(key => {
+    if (!sanitized[key] && record[key] !== undefined) {
+      const val = record[key];
+      if (typeof val === 'object') {
+        sanitized[key] = JSON.stringify(val);
+      } else if (typeof val === 'number' || typeof val === 'boolean') {
+        sanitized[key] = val;
+      }
+    }
+  });
+  
+  return sanitized;
+}
+
+/**
  * Initialize sheets with headers if they don't exist
  */
 function initializeSheets() {
@@ -91,24 +136,53 @@ function initializeSheets() {
 
 /**
  * GET endpoint - Return all data as JSON
+ * Secured with input validation
  */
 function doGet(e) {
   initializeSheets();
   
   const action = e.parameter.action || 'getAll';
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const version = e.parameter.v || '1.0';
   
   let response = {};
+  
+  console.log(`[Script] Action: ${action}, Version: ${version}, Time: ${new Date().toISOString()}`);
   
   try {
     // Handle data parameter for GET requests
     let postData = {};
     if (e.parameter.data) {
       try {
-        postData = JSON.parse(e.parameter.data);
+        postData = JSON.parse(decodeURIComponent(e.parameter.data));
       } catch (err) {
-        // Ignore parse errors
+        console.log('[Script] Data parse error:', err.message);
+        // Try without decode
+        try {
+          postData = JSON.parse(e.parameter.data);
+        } catch (err2) {
+          console.log('[Script] Data parse failed');
+        }
       }
+    }
+    
+    // Validate incoming data
+    if (postData && postData.record) {
+      postData.record = sanitizeRecord(postData.record);
+    }
+    if (postData && postData.assessment) {
+      postData.assessment = sanitizeRecord(postData.assessment);
+    }
+    if (postData && postData.student) {
+      postData.student = sanitizeRecord(postData.student);
+    }
+    if (postData && postData.payment) {
+      postData.payment = sanitizeRecord(postData.payment);
+    }
+    if (postData && postData.teacher) {
+      postData.teacher = sanitizeRecord(postData.teacher);
+    }
+    if (postData && postData.staff) {
+      postData.staff = sanitizeRecord(postData.staff);
     }
     
     // Handle addAssessment via GET
@@ -597,7 +671,7 @@ function doPost(e) {
 }
 
 /**
- * Get all records from a sheet
+ * Get all records from a sheet (with deduplication)
  */
 function getAllRecords(sheetName, headers) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -609,26 +683,43 @@ function getAllRecords(sheetName, headers) {
   if (lastRow <= 1) return [];
   
   const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const seenIds = new Set();
+  const results = [];
   
-  return data.map(row => {
+  data.forEach(row => {
     let obj = {};
+    let idValue = null;
+    
     headers.forEach((header, index) => {
       let value = row[index];
+      
+      // Capture ID for deduplication
+      if (header === 'id') {
+        idValue = String(value || '').trim();
+      }
       
       // Clean corrupted selectedFees values (Java object references)
       if (header === 'selectedFees' && typeof value === 'string' && value.includes('java.lang.Object')) {
         value = 't1,t2,t3'; // Default format
       }
       
-      // Ensure all values are properly serializable (convert objects/arrays to strings)
+      // Ensure all values are properly serializable
       if (value && typeof value === 'object') {
         value = String(value).includes('java.lang') ? '' : JSON.stringify(value);
       }
       
       obj[header] = value;
     });
-    return obj;
+    
+    // Deduplicate by ID
+    if (idValue && !seenIds.has(idValue)) {
+      seenIds.add(idValue);
+      results.push(obj);
+    }
   });
+  
+  console.log(`[Sheet] ${sheetName}: ${data.length} rows → ${results.length} unique records`);
+  return results;
 }
 
 /**
