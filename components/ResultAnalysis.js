@@ -507,6 +507,15 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                     </div>
                 </div>
             </div>
+
+            <!-- Report Footer -->
+            <div class="mt-6 pt-3 border-t border-slate-200 print:border-black">
+                <div class="flex justify-between items-center text-[8px] text-slate-400">
+                    <span>${data.settings.schoolName} - ${data.settings.schoolAddress}</span>
+                    <span>Academic Year: ${filterYear}</span>
+                    <span>Performance Analysis - ${filterTerm === 'FULL' ? 'Full Year' : filterTerm}</span>
+                </div>
+            </div>
         </div>
     `;
 };

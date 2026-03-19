@@ -69,6 +69,7 @@ export const Assessments = ({ data, setData }) => {
         const newAssessment = {
             id: existing?.id || ('A-' + Date.now() + Math.random().toString().slice(2, 6)),
             studentId: studentIdStr,
+            grade: selectedGrade,
             subject: selectedSubject,
             term: selectedTerm,
             examType: selectedExamType,
@@ -77,70 +78,86 @@ export const Assessments = ({ data, setData }) => {
             academicYear: academicYear,
             date: new Date().toISOString().split('T')[0]
         };
-        setData({ ...data, assessments: [...otherAssessments, newAssessment] });
         
-        // Auto-sync to Google Sheet
-        if (data.settings.googleScriptUrl) {
-            syncToGoogle([newAssessment]);
+        // 1. SAVE LOCALLY FIRST
+        const updatedAssessments = [...otherAssessments, newAssessment];
+        setData({ ...data, assessments: updatedAssessments });
+        console.log('✓ Assessment saved locally:', newAssessment.id, '- Subject:', newAssessment.subject);
+        
+        // 2. SYNC TO GOOGLE SHEET (fire and forget, don't block)
+        if (data.settings?.googleScriptUrl) {
+            syncToGoogleSilent(newAssessment).catch(err => {
+                console.warn('⚠ Auto-sync failed:', err.message, '- Will retry later');
+            });
+        }
+    };
+    
+    // Silent async sync - doesn't block UI
+    const syncToGoogleSilent = async (assessment) => {
+        if (!data.settings?.googleScriptUrl) return;
+        
+        try {
+            googleSheetSync.setSettings(data.settings);
+            const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+            const enriched = {
+                ...assessment,
+                studentName: student?.name || 'Unknown',
+                grade: student?.grade || assessment.grade || ''
+            };
+            
+            // Try to push as new record first
+            const result = await googleSheetSync.pushAssessment(enriched);
+            if (result.success) {
+                console.log('Assessment synced to Google:', assessment.id);
+            } else {
+                console.warn('Assessment sync returned false:', result.error);
+            }
+        } catch (err) {
+            console.warn('Assessment sync error:', err.message);
+            throw err; // Re-throw so caller knows it failed
         }
     };
     
     const syncToGoogle = async (assessments) => {
-        if (!data.settings.googleScriptUrl || isSyncing) return;
+        if (!data.settings?.googleScriptUrl) {
+            setSyncStatus('Google Sheet not configured');
+            return;
+        }
         
         setIsSyncing(true);
         setSyncStatus('Syncing to Google Sheet...');
         googleSheetSync.setSettings(data.settings);
         
         try {
-            const updatedAssessments = [];
+            let successCount = 0;
+            let failCount = 0;
             
             for (const assessment of assessments) {
-                const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
-                const enriched = {
-                    ...assessment,
-                    studentName: student?.name || 'Unknown',
-                    grade: student?.grade || ''
-                };
-                
-                // Use updateRecord for existing assessments, pushAssessment for new ones
-                // The assessment already has an `id`; updateRecord will find and update its row.
-                let result;
-                if (assessment.id) {
-                    result = await googleSheetSync.updateRecord('Assessments', enriched);
-                    if (!result.success) {
-                        // Fallback to push (new row) if record not found on sheet yet
-                        result = await googleSheetSync.pushAssessment(enriched);
+                try {
+                    const student = (data.students || []).find(s => String(s.id) === String(assessment.studentId));
+                    const enriched = {
+                        ...assessment,
+                        studentName: student?.name || 'Unknown',
+                        grade: student?.grade || assessment.grade || ''
+                    };
+                    
+                    const result = await googleSheetSync.pushAssessment(enriched);
+                    if (result.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
                     }
-                } else {
-                    result = await googleSheetSync.pushAssessment(enriched);
-                }
-                
-                if (result.success) {
-                    const updatedAssessment = { ...assessment, ...(result.updatedData || {}) };
-                    updatedAssessments.push(updatedAssessment);
-                } else {
-                    updatedAssessments.push(assessment);
+                } catch (singleErr) {
+                    failCount++;
+                    console.warn('Single assessment sync failed:', singleErr.message);
                 }
             }
             
-            // Merge back any changes returned from Google
-            if (updatedAssessments.length > 0) {
-                const currentAssessments = [...data.assessments];
-                updatedAssessments.forEach(updated => {
-                    const idx = currentAssessments.findIndex(a => a.id === updated.id);
-                    if (idx >= 0) {
-                        currentAssessments[idx] = updated;
-                    }
-                });
-                setData({ ...data, assessments: currentAssessments });
-            }
-            
-            setSyncStatus('✓ Synced!');
-            setTimeout(() => setSyncStatus(''), 2000);
+            setSyncStatus(`✓ Synced: ${successCount} success, ${failCount} failed`);
+            setTimeout(() => setSyncStatus(''), 3000);
         } catch (error) {
             console.error('Sync error:', error);
-            setSyncStatus('Sync failed');
+            setSyncStatus('Sync failed - saved locally');
             setTimeout(() => setSyncStatus(''), 3000);
         }
         
@@ -193,6 +210,58 @@ export const Assessments = ({ data, setData }) => {
         }
     };
     
+    const fetchFromGoogle = async () => {
+        if (!data.settings.googleScriptUrl) {
+            alert('Google Sheet not configured. Go to Settings > Teacher Data Sync.');
+            return;
+        }
+        
+        if (!confirm('Fetch assessments from Google Sheet? This will merge with existing data.')) return;
+        
+        setSyncStatus('Fetching from Google Sheet...');
+        setIsSyncing(true);
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            const result = await googleSheetSync.fetchAll();
+            
+            if (result.success && result.assessments) {
+                // Merge assessments from Google Sheet with local data
+                const localAssessments = data.assessments || [];
+                const remoteAssessments = result.assessments || [];
+                
+                // Merge, preferring newer data (by date)
+                const mergedAssessments = [...localAssessments];
+                let addedCount = 0;
+                
+                remoteAssessments.forEach(remote => {
+                    const exists = mergedAssessments.some(a => 
+                        a.id === remote.id ||
+                        (a.studentId === remote.studentId && 
+                         a.subject === remote.subject && 
+                         a.term === remote.term && 
+                         a.examType === remote.examType &&
+                         a.academicYear === remote.academicYear)
+                    );
+                    if (!exists) {
+                        mergedAssessments.push(remote);
+                        addedCount++;
+                    }
+                });
+                
+                setData({ ...data, assessments: mergedAssessments });
+                setSyncStatus(`✓ Fetched ${addedCount} new assessment(s) from Google`);
+            } else {
+                setSyncStatus('⚠ Failed to fetch from Google Sheet');
+            }
+        } catch (error) {
+            console.error('Fetch error:', error);
+            setSyncStatus('⚠ Fetch failed');
+        }
+        
+        setTimeout(() => { setSyncStatus(''); setIsSyncing(false); }, 3000);
+    };
+    
     const syncAllToGoogle = async () => {
         if (!data.settings.googleScriptUrl) {
             alert('Google Sheet not configured. Go to Settings > Teacher Data Sync.');
@@ -242,11 +311,11 @@ export const Assessments = ({ data, setData }) => {
                             ${isSyncing ? 'Syncing...' : 'Sync to Sheet'}
                         </button>
                         <button 
-                            onClick=${handleSyncDeletions}
+                            onClick=${fetchFromGoogle}
                             class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"
-                            title="Check for assessments deleted in Google Sheet"
+                            title="Fetch assessments from Google Sheet"
                         >
-                            <span>↻</span> Sync from Sheet
+                            <span>↓</span> Pull from Sheet
                         </button>
                     </div>
                 `}
@@ -409,6 +478,7 @@ export const Assessments = ({ data, setData }) => {
                                                 max="100"
                                                 value=${assessment.score}
                                                 onChange=${(e) => {
+                                                    // 1. SAVE LOCALLY FIRST
                                                     const updated = {
                                                         ...assessment,
                                                         score: Number(e.target.value),
@@ -416,7 +486,12 @@ export const Assessments = ({ data, setData }) => {
                                                     };
                                                     const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
                                                     setData({ ...data, assessments: updatedAssessments });
-                                                    syncToGoogle([updated]);
+                                                    console.log('Score updated locally:', assessment.id);
+                                                    
+                                                    // 2. SYNC TO GOOGLE (silent)
+                                                    if (data.settings?.googleScriptUrl) {
+                                                        syncToGoogleSilent(updated).catch(() => {});
+                                                    }
                                                 }}
                                                 class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
                                             />

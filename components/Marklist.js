@@ -113,7 +113,7 @@ export const Marklist = ({ data = {}, setData = () => { } }) => {
                 </div>
             </div>
 
-            <div class="Print-only mb-6 flex flex-col items-center text-center">
+            <div class="print-only mb-6 flex flex-col items-center text-center">
                 <img src="${settings.schoolLogo || ''}" class="w-16 h-16 mb-2 object-contain" alt="Logo" />
                 <h1 class="text-2xl font-black uppercase">${settings.schoolName || 'School'}</h1>
                 <h2 class="text-sm font-bold uppercase text-slate-500 mt-1">Official Class Marklist - ${selectedGradeStream}</h2>
@@ -433,6 +433,15 @@ export const Marklist = ({ data = {}, setData = () => { } }) => {
     }, 0) / students.length / 12.5) || '-' : '-'}</p>
                         <p class="text-[8px] font-bold text-orange-600 uppercase">Overall Points</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Report Footer -->
+            <div class="mt-6 pt-3 border-t border-slate-200 print:border-black">
+                <div class="flex justify-between items-center text-[8px] text-slate-400">
+                    <span>${settings.schoolName} - ${settings.schoolAddress}</span>
+                    <span>Academic Year: ${academicYear}</span>
+                    <span>Class Marklist - ${selectedGradeStream}</span>
                 </div>
             </div>
         </div>

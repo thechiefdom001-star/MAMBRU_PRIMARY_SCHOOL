@@ -146,7 +146,7 @@ export const Fees = ({ data, setData }) => {
             items: { ...paymentItems },
             term: selectedTerm,
             academicYear: data.settings.academicYear,
-            date: new Date().toLocaleDateString(),
+            date: new Date().toISOString().split('T')[0],
             receiptNo: 'RCP-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0')
         };
 
@@ -156,29 +156,36 @@ export const Fees = ({ data, setData }) => {
         const studentPayments = (data.payments || []).filter(p => p.studentId === selectedStudentId);
         const allPaymentsForStudent = [...studentPayments, newPayment];
 
-        // UPDATE LOCAL STATE IMMEDIATELY
-        const updatedData = { ...data, payments: [...(data.payments || []), newPayment] };
+        // UPDATE LOCAL STATE AND SAVE IMMEDIATELY
+        const updatedPayments = [...(data.payments || []), newPayment];
+        const updatedData = { ...data, payments: updatedPayments };
+        
+        console.log('✓ Payment saved locally - ID:', newPayment.id, '- Amount:', totalAmount);
+        
         setData(updatedData);
 
-        // Then sync to Google Sheet asynchronously
+        // Sync to Google Sheet asynchronously
         if (data.settings.googleScriptUrl) {
-            setSyncStatus('Syncing payment to Google...');
+            setSyncStatus('Syncing to Google...');
             googleSheetSync.setSettings(data.settings);
             
             googleSheetSync.pushPayment(newPayment).then(res => {
                 if (res.success) {
-                    setSyncStatus('✓ Payment recorded & synced to Google');
-                    console.log('Payment synced successfully:', newPayment.id);
+                    setSyncStatus('✓ Payment saved & synced');
+                    console.log('✓ Payment synced to Google:', newPayment.id);
                 } else {
-                    setSyncStatus('⚠ Payment recorded locally (sync pending)');
-                    console.warn('Payment sync failed:', res.error);
+                    setSyncStatus('✓ Saved locally (Google sync pending)');
+                    console.log('⚠ Payment sync warning:', res.error);
                 }
                 setTimeout(() => setSyncStatus(''), 3000);
             }).catch(err => {
-                setSyncStatus('⚠ Payment recorded locally (sync pending)');
-                console.error('Payment sync error:', err);
-                setTimeout(() => setSyncStatus(''), 3000);
+                setSyncStatus('✓ Saved locally');
+                console.log('⚠ Payment sync failed (saved locally):', err.message);
+                setTimeout(() => setSyncStatus(''), 2000);
             });
+        } else {
+            setSyncStatus('✓ Payment saved locally');
+            setTimeout(() => setSyncStatus(''), 2000);
         }
 
         setReceipt({
@@ -310,6 +317,8 @@ export const Fees = ({ data, setData }) => {
             }
             return p;
         });
+
+        console.log('Voiding payment:', paymentId, 'Total payments now:', updatedPayments.length);
 
         // UPDATE LOCAL STATE IMMEDIATELY
         setData({ ...data, payments: updatedPayments });
@@ -865,6 +874,46 @@ export const Fees = ({ data, setData }) => {
                 <div class="p-6 border-b border-slate-50 flex justify-between items-center no-print">
                     <h3 class="font-bold">Transaction History</h3>
                     <div class="flex items-center gap-4">
+                        ${data.settings.googleScriptUrl && html`
+                            <button 
+                                onClick=${async () => {
+                                    if (!confirm('Sync all payments to Google Sheet?')) return;
+                                    setSyncStatus('Syncing payments...');
+                                    googleSheetSync.setSettings(data.settings);
+                                    let success = 0, failed = 0;
+                                    for (const p of data.payments || []) {
+                                        const result = await googleSheetSync.pushPayment(p);
+                                        if (result.success) success++;
+                                        else failed++;
+                                    }
+                                    setSyncStatus(`✓ Synced: ${success} success, ${failed} failed`);
+                                    setTimeout(() => setSyncStatus(''), 3000);
+                                }}
+                                class="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"
+                            >
+                                📤 Sync to Google
+                            </button>
+                            <button 
+                                onClick=${async () => {
+                                    if (!confirm('Fetch payments from Google Sheet?')) return;
+                                    setSyncStatus('Fetching payments...');
+                                    googleSheetSync.setSettings(data.settings);
+                                    const result = await googleSheetSync.fetchAll();
+                                    if (result.success && result.payments) {
+                                        const merged = Storage.mergeData(data, { payments: result.payments }, 'payments');
+                                        setData(merged);
+                                        setSyncStatus(`✓ Fetched ${result.payments.length} payments`);
+                                    } else {
+                                        setSyncStatus('⚠ Fetch failed');
+                                    }
+                                    setTimeout(() => setSyncStatus(''), 3000);
+                                }}
+                                class="bg-purple-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"
+                            >
+                                📥 Pull from Google
+                            </button>
+                        `}
+                        ${syncStatus && html`<span class="text-xs font-bold ${syncStatus.includes('✓') ? 'text-green-600' : 'text-blue-600'}">${syncStatus}</span>`}
                         <button 
                             onClick=${handlePrintTable}
                             class="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1"

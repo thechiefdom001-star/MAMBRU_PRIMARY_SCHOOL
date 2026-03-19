@@ -61,7 +61,8 @@ export const Library = ({ data, setData }) => {
         const activeLoan = library.transactions.find(t => t.studentId === selectedStudentId && t.status === 'Borrowed');
         if (activeLoan) {
             const borrowedBook = library.books.find(b => b.id === activeLoan.bookId);
-            alert(`This student already has an active loan: "${borrowedBook?.title}". They must return it first.`);
+            const bookTitle = borrowedBook && borrowedBook.title ? borrowedBook.title : 'book';
+            alert('This student already has an active loan: "' + bookTitle + '". They must return it first.');
             return;
         }
 
@@ -134,6 +135,14 @@ export const Library = ({ data, setData }) => {
         }
     };
 
+    const toggleAddBook = () => {
+        if (showAddBook) {
+            setEditingBookId(null);
+            setNewBook({ title: '', author: '', isbn: '', quantity: 1 });
+        }
+        setShowAddBook(!showAddBook);
+    };
+
     const totalBooks = library.books.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
     const availableBooks = library.books.filter(b => b.status === 'Available').reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
     const borrowedBooks = totalBooks - availableBooks;
@@ -177,18 +186,12 @@ export const Library = ({ data, setData }) => {
                 </div>
             </div>
 
-            ${view === 'inventory' ? html`
+            ${view === 'inventory' && html`
                 <div class="space-y-6">
                     <div class="flex justify-between items-center no-print">
                         <h3 class="font-bold text-lg">Book Collection</h3>
                         <button 
-                            onClick=${() => {
-                                if (showAddBook) {
-                                    setEditingBookId(null);
-                                    setNewBook({ title: '', author: '', isbn: '', quantity: 1 });
-                                }
-                                setShowAddBook(!showAddBook);
-                            }}
+                            onClick=${toggleAddBook}
                             class="text-blue-600 text-sm font-bold uppercase hover:underline"
                         >
                             ${showAddBook ? 'Cancel' : '+ Add New Book'}
@@ -220,6 +223,16 @@ export const Library = ({ data, setData }) => {
                             </div>
                         </form>
                     `}
+
+                    <!-- Print Header -->
+                    <div class="hidden print:flex flex-col items-center text-center border-b pb-2 mb-2">
+                        <img src="${data.settings.schoolLogo}" class="w-12 h-12 mb-1 object-contain" alt="Logo" />
+                        <h1 class="text-xl font-black uppercase text-slate-900">${data.settings.schoolName}</h1>
+                        <p class="text-[10px] text-slate-500 font-medium">${data.settings.schoolAddress}</p>
+                        <div class="mt-2 border-t border-slate-200 w-full pt-2">
+                            <h2 class="text-sm font-extrabold uppercase tracking-widest text-blue-600">Library Inventory Report</h2>
+                        </div>
+                    </div>
 
                     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                         <table class="w-full text-left min-w-[700px]">
@@ -271,7 +284,9 @@ export const Library = ({ data, setData }) => {
                         </table>
                     </div>
                 </div>
-            ` : html`
+            `}
+
+            ${view === 'borrow' && html`
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm no-print">
                         <h3 class="font-bold mb-4">Issue Book</h3>
@@ -322,11 +337,13 @@ export const Library = ({ data, setData }) => {
                                 ${library.transactions.slice().reverse().map(t => {
                                     const book = library.books.find(b => b.id === t.bookId);
                                     const student = (students || []).find(s => String(s.id) === String(t.studentId));
+                                    const studentName = student && student.name ? student.name : 'Unknown';
+                                    const bookTitle = book && book.title ? book.title : 'Unknown Book';
                                     return html`
                                         <tr key=${t.id} class="hover:bg-slate-50 text-sm">
                                             <td class="px-6 py-4">
-                                                <div class="font-bold">${student?.name || 'Unknown'}</div>
-                                                <div class="text-[10px] text-slate-400">${book?.title || 'Unknown Book'}</div>
+                                                <div class="font-bold">${studentName}</div>
+                                                <div class="text-[10px] text-slate-400">${bookTitle}</div>
                                             </td>
                                             <td class="px-6 py-4">
                                                 <div class="text-[10px]">Out: ${t.borrowDate}</div>
@@ -353,6 +370,15 @@ export const Library = ({ data, setData }) => {
                     </div>
                 </div>
             `}
+
+            <!-- Report Footer -->
+            <div class="mt-6 pt-3 border-t border-slate-200 print:border-black">
+                <div class="flex justify-between items-center text-[8px] text-slate-400">
+                    <span>${data.settings.schoolName} - ${data.settings.schoolAddress}</span>
+                    <span>Academic Year: ${data.settings.academicYear}</span>
+                    <span>Library Report</span>
+                </div>
+            </div>
         </div>
     `;
 };

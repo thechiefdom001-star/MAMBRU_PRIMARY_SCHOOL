@@ -45,7 +45,9 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
     const totalStudents = students.length;
     const totalTeachers = (data?.teachers || []).length;
     const totalStaff = (data?.staff || []).length;
-    const totalFeesCollected = (data?.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const totalFeesCollected = (data?.payments || [])
+        .filter(p => !p.voided)
+        .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const expectedFees = students.reduce((sum, s) => {
         const fin = Storage.getStudentFinancials(s, data.payments, settings);
         return sum + fin.totalDue;
@@ -56,7 +58,7 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
     const feesPerGrade = (settings.grades || []).map(grade => {
         const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
         const total = (data?.payments || [])
-            .filter(p => gradeStudentIds.includes(p.studentId))
+            .filter(p => gradeStudentIds.includes(p.studentId) && !p.voided)
             .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
         return { grade, total };
     });

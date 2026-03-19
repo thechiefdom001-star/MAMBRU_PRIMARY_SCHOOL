@@ -53,7 +53,7 @@ export const FeeReminder = ({ data }) => {
             .map(col => {
                 const due = Number(feeStructure[col.key]) || 0;
                 const paid = payments
-                    .filter(p => String(p.studentId) === String(student.id))
+                    .filter(p => String(p.studentId) === String(student.id) && !p.voided)
                     .reduce((sum, p) => sum + (Number(p.items?.[col.key]) || 0), 0);
                 
                 return { label: col.label, due, paid, balance: due - paid, key: col.key };
@@ -61,7 +61,7 @@ export const FeeReminder = ({ data }) => {
             .filter(item => item.due > 0 || item.paid > 0);
 
         const currentYearPaid = payments
-            .filter(p => String(p.studentId) === String(student.id))
+            .filter(p => String(p.studentId) === String(student.id) && !p.voided)
             .reduce((sum, p) => sum + Number(p.amount), 0);
 
         if (Number(student.previousArrears) > 0) {
@@ -96,9 +96,9 @@ export const FeeReminder = ({ data }) => {
     });
 
     return html`
-        <div class="space-y-6 fee-reminder-container">
+        <div class="space-y-6">
             <!-- Header Section -->
-            <div class="bg-gradient-to-r from-[#7FFFD4] via-[#7FFFD4] to-[#7FFFD4] rounded-2xl p-6 text-slate-800 shadow-lg border border-[#5FD3B3] no-print">
+            <div class="bg-gradient-to-r from-[#7FFFD4] via-[#7FFFD4] to-[#7FFFD4] rounded-2xl p-6 text-slate-800 shadow-lg border border-[#5FD3B3]">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div class="flex items-center gap-4">
                         <div class="w-14 h-14 bg-white/40 rounded-xl flex items-center justify-center backdrop-blur">
@@ -122,7 +122,7 @@ export const FeeReminder = ({ data }) => {
             </div>
 
             <!-- Filters -->
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 no-print">
+            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="space-y-2">
                         <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Academic Term</label>
@@ -164,292 +164,632 @@ export const FeeReminder = ({ data }) => {
                 </div>
             </div>
 
+            <!-- Empty State -->
+            ${filteredStudents.length === 0 && html`
+                <div class="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-16 text-center">
+                    <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-4xl">✓</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-700 mb-2">All Fees Clear!</h3>
+                    <p class="text-slate-400">No students with outstanding balances in the selected filters.</p>
+                </div>
+            `}
+            
+            <!-- Fee Reminder Cards -->
+            ${filteredStudents.map((student) => {
+                const finance = calculateArrears(student);
+                const dueItems = finance.items.filter(item => {
+                    if (selectedTerm === 'ALL') return true;
+                    const termKey = selectedTerm.toLowerCase();
+                    return item.key === 'prev' || !['t1', 't2', 't3'].includes(item.key) || item.key === termKey;
+                });
+                
+                return html`
+                    <div class="reminder-document">
+                        <!-- Document Header -->
+                        <div class="doc-header">
+                            <div class="school-info">
+                                ${settings.schoolLogo && html`<img src="${settings.schoolLogo}" class="school-logo" />`}
+                                <div>
+                                    <h1 class="school-name">${settings.schoolName || 'SCHOOL NAME'}</h1>
+                                    <p class="school-address">${settings.schoolAddress || ''}</p>
+                                </div>
+                            </div>
+                            <div class="doc-meta">
+                                <p class="meta-label">Notice Date</p>
+                                <p class="meta-value">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                            </div>
+                        </div>
+
+                        <!-- Report Info -->
+                        <div class="report-info">
+                            <div class="info-item">
+                                <span class="info-label">Class</span>
+                                <span class="info-value">${student.grade} ${student.stream || ''}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Term</span>
+                                <span class="info-value">${selectedTerm === 'ALL' ? 'Full Year' : selectedTerm}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Academic Year</span>
+                                <span class="info-value">${settings.academicYear || '2025/2026'}</span>
+                            </div>
+                        </div>
+
+                        <!-- Notice Title -->
+                        <div class="notice-title">
+                            <h2>Official Fee Balance Notice</h2>
+                        </div>
+
+                        <!-- Student & Amount Details -->
+                        <div class="student-balance-grid">
+                            <!-- Student Info -->
+                            <div class="student-box">
+                                <div class="box-header">
+                                    <span class="box-icon">👤</span>
+                                    <p class="box-label">Student Details</p>
+                                </div>
+                                <p class="student-name">${student.name}</p>
+                                <div class="student-details">
+                                    <div>
+                                        <p class="detail-label">Grade</p>
+                                        <p class="detail-value">${student.grade} ${student.stream || ''}</p>
+                                    </div>
+                                    <div>
+                                        <p class="detail-label">Admission No.</p>
+                                        <p class="detail-value mono">${student.admissionNo}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Balance Summary -->
+                            <div class="balance-box">
+                                <div class="box-header">
+                                    <span class="box-icon">💰</span>
+                                    <p class="box-label">Outstanding Balance</p>
+                                </div>
+                                <p class="balance-amount">${settings.currency} ${finance.balance.toLocaleString()}</p>
+                                <div class="balance-details">
+                                    <div>
+                                        <p class="detail-label">Total Due</p>
+                                        <p class="detail-value">${settings.currency} ${finance.totalDue.toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <p class="detail-label">Amount Paid</p>
+                                        <p class="detail-value text-green">${settings.currency} ${finance.totalPaid.toLocaleString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fee Breakdown Table -->
+                        <table class="fee-table">
+                            <thead>
+                                <tr>
+                                    <th class="text-left">Fee Item</th>
+                                    <th class="text-right">Amount Due</th>
+                                    <th class="text-right">Amount Paid</th>
+                                    <th class="text-right">Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${dueItems.map(item => html`
+                                    <tr class=${item.balance > 0 ? 'has-balance' : ''}>
+                                        <td>${item.label}</td>
+                                        <td class="text-right mono">${item.due.toLocaleString()}</td>
+                                        <td class="text-right mono text-green">${item.paid.toLocaleString()}</td>
+                                        <td class="text-right mono ${item.balance > 0 ? 'text-red' : 'text-gray'}">
+                                            ${item.balance > 0 ? item.balance.toLocaleString() : '-'}
+                                        </td>
+                                    </tr>
+                                `)}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td><strong>TOTAL</strong></td>
+                                    <td class="text-right"><strong>${finance.totalDue.toLocaleString()}</strong></td>
+                                    <td class="text-right text-green"><strong>${finance.totalPaid.toLocaleString()}</strong></td>
+                                    <td class="text-right text-red"><strong>${finance.balance.toLocaleString()}</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+
+                        <!-- Urgent Notice -->
+                        <div class="notice-message">
+                            <p><strong>Dear Parent/Guardian,</strong></p>
+                            <p>This is a friendly reminder that there is an outstanding balance of <strong class="amount">${settings.currency} ${finance.balance.toLocaleString()}</strong> on your child's school fees account. Please arrange payment at your earliest convenience to avoid interruption of learning services.</p>
+                        </div>
+
+                        <!-- Payment Methods -->
+                        ${(settings.bankName || settings.mpesaPaybill || settings.airtelPaybill) && html`
+                            <div class="payment-section">
+                                <p class="payment-title">Official Payment Channels</p>
+                                <div class="methods-grid">
+                                    ${settings.bankName && html`
+                                        <div class="method-card">
+                                            <p class="method-name">🏦 Bank Transfer</p>
+                                            <p class="method-detail">${settings.bankName}</p>
+                                            <p class="method-small">A/C: ${settings.bankAccount || 'N/A'}</p>
+                                        </div>
+                                    `}
+                                    ${settings.mpesaPaybill && html`
+                                        <div class="method-card">
+                                            <p class="method-name">📱 M-Pesa</p>
+                                            <p class="method-detail">Paybill: ${settings.mpesaPaybill}</p>
+                                            <p class="method-small">A/C: ${settings.mpesaAccountName || 'School Fees'}</p>
+                                        </div>
+                                    `}
+                                    ${settings.airtelPaybill && html`
+                                        <div class="method-card">
+                                            <p class="method-name">📱 Airtel</p>
+                                            <p class="method-detail">Paybill: ${settings.airtelPaybill}</p>
+                                            <p class="method-small">A/C: ${settings.airtelAccountName || 'School Fees'}</p>
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        `}
+
+                        <!-- Signatures -->
+                        <div class="signatures">
+                            <div class="sig-box">
+                                <div class="sig-line">
+                                    ${settings.clerkSignature && html`<img src="${settings.clerkSignature}" class="sig-img" />`}
+                                </div>
+                                <p class="sig-label">Authorized Signatory</p>
+                                <p class="sig-sub">Accounts Department</p>
+                            </div>
+                            <div class="sig-box">
+                                <div class="stamp-box">
+                                    ${settings.schoolLogo && html`<img src="${settings.schoolLogo}" class="stamp-img" />`}
+                                </div>
+                                <p class="sig-label">School Stamp</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            })}
+
             <!-- Print Styles -->
-            <style>
+            <style>${`
+                /* Document Styles - Print Ready */
+                .reminder-document {
+                    width: 210mm;
+                    min-height: 297mm;
+                    margin: 0 auto 30px;
+                    background: white;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                    padding: 15mm;
+                    box-sizing: border-box;
+                    border-radius: 12px;
+                    page-break-after: always;
+                    font-family: system-ui, -apple-system, sans-serif;
+                }
+                
+                /* Document Header */
+                .doc-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    padding-bottom: 15px;
+                    border-bottom: 3px solid #C0C0C0;
+                    margin-bottom: 15px;
+                    background: #C0C0C0;
+                    margin: -15mm -15mm 15px -15mm;
+                    padding: 15mm;
+                    border-radius: 0;
+                }
+                
+                .school-info {
+                    display: flex;
+                    align-items: center;
+                    gap: 15px;
+                }
+                
+                .school-logo {
+                    width: 60px;
+                    height: 60px;
+                    object-fit: contain;
+                    background: white;
+                    padding: 4px;
+                    border-radius: 8px;
+                }
+                
+                .school-name {
+                    font-size: 22px;
+                    font-weight: 900;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    color: #1e293b;
+                    margin: 0;
+                }
+                
+                .school-address {
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
+                    color: #475569;
+                    margin: 4px 0 0 0;
+                }
+                
+                .doc-meta {
+                    text-align: right;
+                    background: rgba(255,255,255,0.7);
+                    padding: 10px 15px;
+                    border-radius: 8px;
+                    border: 1px solid #9ca3af;
+                }
+                
+                .meta-label {
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    color: #6b7280;
+                    margin: 0;
+                }
+                
+                .meta-value {
+                    font-size: 14px;
+                    font-weight: bold;
+                    color: #1e293b;
+                    margin: 2px 0 0 0;
+                }
+                
+                /* Report Info */
+                .report-info {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 12px;
+                    margin-bottom: 15px;
+                }
+                
+                .info-item {
+                    background: #f8fafc;
+                    padding: 12px;
+                    border-radius: 10px;
+                    text-align: center;
+                    border: 1px solid #e2e8f0;
+                }
+                
+                .info-label {
+                    display: block;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    color: #94a3b8;
+                    margin-bottom: 4px;
+                    font-weight: 600;
+                }
+                
+                .info-value {
+                    display: block;
+                    font-size: 14px;
+                    font-weight: 800;
+                    color: #1e293b;
+                }
+                
+                /* Notice Title */
+                .notice-title {
+                    text-align: center;
+                    padding: 12px 0;
+                    border-bottom: 2px solid #e2e8f0;
+                    margin-bottom: 15px;
+                }
+                
+                .notice-title h2 {
+                    font-size: 14px;
+                    font-weight: 900;
+                    text-transform: uppercase;
+                    letter-spacing: 3px;
+                    color: #1e293b;
+                    margin: 0;
+                }
+                
+                /* Student & Balance Grid */
+                .student-balance-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 15px;
+                    margin-bottom: 15px;
+                }
+                
+                .student-box, .balance-box {
+                    padding: 15px;
+                    border-radius: 12px;
+                }
+                
+                .student-box {
+                    background: #eff6ff;
+                    border: 1px solid #bfdbfe;
+                }
+                
+                .balance-box {
+                    background: #fef2f2;
+                    border: 1px solid #fecaca;
+                }
+                
+                .box-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-bottom: 10px;
+                }
+                
+                .box-icon {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 14px;
+                }
+                
+                .student-box .box-icon { background: #3b82f6; }
+                .balance-box .box-icon { background: #ef4444; }
+                
+                .box-label {
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                }
+                
+                .student-box .box-label { color: #3b82f6; }
+                .balance-box .box-label { color: #ef4444; }
+                
+                .student-name {
+                    font-size: 18px;
+                    font-weight: 900;
+                    color: #1e293b;
+                    margin: 0 0 10px 0;
+                }
+                
+                .student-details {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 10px;
+                }
+                
+                .detail-label {
+                    font-size: 10px;
+                    color: #94a3b8;
+                    margin: 0;
+                }
+                
+                .detail-value {
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #334155;
+                    margin: 2px 0 0 0;
+                }
+                
+                .detail-value.mono { font-family: monospace; }
+                .detail-value.text-green { color: #16a34a; }
+                
+                .balance-amount {
+                    font-size: 28px;
+                    font-weight: 900;
+                    color: #dc2626;
+                    margin: 0 0 10px 0;
+                }
+                
+                .balance-details {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 10px;
+                }
+                
+                /* Fee Table */
+                .fee-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 15px;
+                    font-size: 12px;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 10px;
+                    overflow: hidden;
+                }
+                
+                .fee-table th {
+                    background: #1e293b;
+                    color: white;
+                    padding: 12px 10px;
+                    text-align: left;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                }
+                
+                .fee-table td {
+                    padding: 10px;
+                    border-bottom: 1px solid #f1f5f9;
+                }
+                
+                .fee-table tr.has-balance { background: #fef2f2; }
+                .fee-table tbody tr:last-child td { border-bottom: none; }
+                
+                .fee-table tfoot td {
+                    background: #f8fafc;
+                    border-top: 2px solid #1e293b;
+                    padding: 12px 10px;
+                    font-size: 12px;
+                }
+                
+                .text-left { text-align: left; }
+                .text-right { text-align: right; }
+                .mono { font-family: monospace; }
+                .text-green { color: #16a34a; }
+                .text-red { color: #dc2626; }
+                .text-gray { color: #9ca3af; }
+                
+                /* Notice Message */
+                .notice-message {
+                    background: #fffbeb;
+                    border: 1px solid #fcd34d;
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin-bottom: 15px;
+                    font-size: 12px;
+                    line-height: 1.6;
+                }
+                
+                .notice-message p { margin: 0 0 8px 0; color: #78350f; }
+                .notice-message p:last-child { margin-bottom: 0; }
+                .notice-message .amount { font-size: 16px; color: #dc2626; font-weight: 900; }
+                
+                /* Payment Methods */
+                .payment-section {
+                    background: #f8fafc;
+                    border-radius: 10px;
+                    padding: 15px;
+                    margin-bottom: 15px;
+                    border: 1px solid #e2e8f0;
+                }
+                
+                .payment-title {
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    color: #64748b;
+                    margin: 0 0 12px 0;
+                }
+                
+                .methods-grid {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 12px;
+                }
+                
+                .method-card {
+                    background: white;
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 1px solid #e2e8f0;
+                }
+                
+                .method-name {
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: #1e293b;
+                    margin: 0 0 4px 0;
+                }
+                
+                .method-detail {
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: #475569;
+                    margin: 0;
+                }
+                
+                .method-small {
+                    font-size: 9px;
+                    color: #94a3b8;
+                    margin: 4px 0 0 0;
+                }
+                
+                /* Signatures */
+                .signatures {
+                    display: flex;
+                    justify-content: space-between;
+                    padding-top: 20px;
+                    border-top: 1px solid #e2e8f0;
+                    margin-top: auto;
+                }
+                
+                .sig-box { text-align: center; }
+                
+                .sig-line {
+                    height: 50px;
+                    width: 150px;
+                    border-bottom: 1px solid #1e293b;
+                    margin-bottom: 6px;
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: center;
+                }
+                
+                .sig-img { max-height: 45px; object-fit: contain; }
+                
+                .sig-label {
+                    font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    color: #1e293b;
+                    margin: 0;
+                }
+                
+                .sig-sub {
+                    font-size: 9px;
+                    color: #94a3b8;
+                    margin: 2px 0 0 0;
+                }
+                
+                .stamp-box {
+                    width: 60px;
+                    height: 60px;
+                    border: 2px solid #1e293b;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 6px;
+                    opacity: 0.3;
+                }
+                
+                .stamp-img { width: 50px; height: 50px; object-fit: contain; }
+                
+                /* Print Styles */
                 @media print {
                     @page {
-                        size: A4 portrait;
-                        margin: 10mm;
+                        size: A4;
+                        margin: 0;
                     }
-
-                    .no-print {
+                    
+                    html, body {
+                        width: 210mm;
+                        margin: 0;
+                        padding: 0;
+                        background: white;
+                    }
+                    
+                    .space-y-6 > *:not(.reminder-document) {
                         display: none !important;
                     }
-
-                    /* Container */
-                    .fee-reminder-container {
-                        display: block !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-
-                    /* Full-page reminder cards */
-                    .reminder-card {
-                        display: flex !important;
-                        flex-direction: column;
-                        width: 100% !important;
-                        min-height: 277mm !important; /* A4 height (297) - 20mm total margin */
-                        padding: 0 !important;
-                        margin: 0 !important;
-                        border: none !important;
+                    
+                    .reminder-document {
+                        width: 100%;
+                        min-height: 100vh;
+                        margin: 0;
+                        padding: 10mm;
+                        box-shadow: none;
+                        border-radius: 0;
                         page-break-after: always;
                         page-break-inside: avoid;
-                        box-sizing: border-box;
-                        background: white !important;
-                        box-shadow: none !important;
                     }
-
-                    .reminder-card:last-child {
-                        page-break-after: avoid;
+                    
+                    .reminder-document:last-child {
+                        page-break-after: auto;
                     }
-
-                    /* Reset rounding and shadows for cleaner print */
-                    .reminder-card, 
-                    .reminder-card div {
-                        border-radius: 0 !important;
-                        box-shadow: none !important;
-                    }
-
-                    /* Text sizes */
-                    .reminder-card h1 { font-size: 18pt !important; }
-                    .reminder-card h2 { font-size: 13pt !important; }
-                    .reminder-card p { font-size: 11pt !important; }
-                    .reminder-card table { font-size: 10pt !important; }
-
-                    /* Force colors to show */
-                    .print-header-bg {
-                        background-color: #f1f5f9 !important;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
-                        color: #000 !important;
-                    }
-
-                    .bg-blue-50 {
-                        background-color: #eff6ff !important;
+                    
+                    * {
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
                     
-                    .bg-red-50 {
-                        background-color: #fef2f2 !important;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
+                    .doc-header {
+                        background: #C0C0C0 !important;
+                        margin: -10mm -10mm 15px -10mm;
+                        padding: 10mm;
                     }
-
-                    .bg-slate-800 {
-                        background-color: #1e293b !important;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
-                        color: white !important;
-                    }
-
-                    .text-red-600 {
-                        color: #dc2626 !important;
-                        -webkit-print-color-adjust: exact !important;
-                    }
-
-                    .text-green-600 {
-                        color: #16a34a !important;
-                        -webkit-print-color-adjust: exact !important;
-                    }
+                    
+                    .student-box { background: #eff6ff !important; }
+                    .balance-box { background: #fef2f2 !important; }
+                    .fee-table tr.has-balance { background: #fef2f2 !important; }
+                    .notice-message { background: #fffbeb !important; }
+                    .payment-section { background: #f8fafc !important; }
+                    .method-card { background: white !important; }
+                    .info-item { background: #f8fafc !important; }
                 }
-            </style>
-
-            <!-- Fee Reminder Cards -->
-            <div class="space-y-6">
-                ${filteredStudents.length === 0 && html`
-                    <div class="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-16 text-center">
-                        <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <span class="text-4xl">✓</span>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-700 mb-2">All Fees Clear!</h3>
-                        <p class="text-slate-400">No students with outstanding balances in the selected filters.</p>
-                    </div>
-                `}
-                
-                ${filteredStudents.map((student, idx) => {
-                    const finance = calculateArrears(student);
-                    const dueItems = finance.items.filter(item => {
-                        if (selectedTerm === 'ALL') return true;
-                        const termKey = selectedTerm.toLowerCase();
-                        return item.key === 'prev' || !['t1', 't2', 't3'].includes(item.key) || item.key === termKey;
-                    });
-                    
-                    return html`
-                        <div class="reminder-card bg-white rounded-2xl shadow-sm overflow-hidden">
-                            <!-- Professional Header -->
-                            <div class="print-header-bg bg-slate-50 text-slate-800 p-6 border-b border-slate-200">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-4">
-                                        ${settings.schoolLogo && html`
-                                            <img src="${settings.schoolLogo}" class="w-16 h-16 rounded-lg object-contain bg-white p-1" />
-                                        `}
-                                        <div>
-                                            <h1 class="text-xl font-black uppercase tracking-wider text-slate-800">${settings.schoolName || 'SCHOOL NAME'}</h1>
-                                            <p class="text-xs text-slate-600 font-medium uppercase tracking-widest">${settings.schoolAddress || ''}</p>
-                                        </div>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="bg-white/40 backdrop-blur px-4 py-2 rounded-lg border border-slate-300 print:bg-white">
-                                            <p class="text-xs text-slate-600 uppercase font-bold">Notice Date</p>
-                                            <p class="font-bold text-slate-800">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Notice Title -->
-                            <div class="bg-white border-b border-slate-200 py-3 px-6">
-                                <h2 class="text-center font-black text-slate-800 uppercase tracking-widest text-sm">
-                                    📨 Official Fee Balance Notice 
-                                    ${selectedTerm !== 'ALL' ? `— ${selectedTerm}` : ''}
-                                    <span class="mx-2 text-slate-300">|</span> 
-                                    ${settings.academicYear || '2025/2026'}
-                                </h2>
-                            </div>
-
-                            <!-- Student & Amount Details -->
-                            <div class="p-6 flex-grow">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                    <!-- Student Info -->
-                                    <div class="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <span class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold">👤</span>
-                                            <p class="text-xs font-bold text-blue-600 uppercase">Student Details</p>
-                                        </div>
-                                        <p class="text-lg font-black text-slate-800 mb-1">${student.name}</p>
-                                        <div class="grid grid-cols-2 gap-2 text-sm">
-                                            <div>
-                                                <p class="text-xs text-slate-400">Grade</p>
-                                                <p class="font-bold text-slate-700">${student.grade} ${student.stream || ''}</p>
-                                            </div>
-                                            <div>
-                                                <p class="text-xs text-slate-400">Admission No.</p>
-                                                <p class="font-bold text-slate-700 font-mono">${student.admissionNo}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Balance Summary -->
-                                    <div class="bg-red-50 rounded-xl p-4 border border-red-100">
-                                        <div class="flex items-center gap-2 mb-3">
-                                            <span class="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center text-white font-bold">💰</span>
-                                            <p class="text-xs font-bold text-red-600 uppercase">Outstanding Balance</p>
-                                        </div>
-                                        <p class="text-3xl font-black text-red-600 mb-2">${settings.currency} ${finance.balance.toLocaleString()}</p>
-                                        <div class="grid grid-cols-2 gap-2 text-sm">
-                                            <div>
-                                                <p class="text-xs text-slate-400">Total Due</p>
-                                                <p class="font-bold text-slate-700">${settings.currency} ${finance.totalDue.toLocaleString()}</p>
-                                            </div>
-                                            <div>
-                                                <p class="text-xs text-slate-400">Amount Paid</p>
-                                                <p class="font-bold text-green-600">${settings.currency} ${finance.totalPaid.toLocaleString()}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Fee Breakdown Table -->
-                                <div class="border border-slate-200 rounded-xl overflow-hidden mb-6">
-                                    <table class="w-full text-sm">
-                                        <thead class="bg-slate-800 text-white">
-                                            <tr>
-                                                <th class="p-3 text-left font-bold text-xs uppercase">Fee Item</th>
-                                                <th class="p-3 text-right font-bold text-xs uppercase">Amount Due</th>
-                                                <th class="p-3 text-right font-bold text-xs uppercase">Amount Paid</th>
-                                                <th class="p-3 text-right font-bold text-xs uppercase">Balance</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-slate-100">
-                                            ${dueItems.map(item => html`
-                                                <tr class="${item.balance > 0 ? 'bg-red-50/30' : 'bg-white'}">
-                                                    <td class="p-3 font-medium">${item.label}</td>
-                                                    <td class="p-3 text-right font-mono">${item.due.toLocaleString()}</td>
-                                                    <td class="p-3 text-right font-mono text-green-600">${item.paid.toLocaleString()}</td>
-                                                    <td class="p-3 text-right font-bold font-mono ${item.balance > 0 ? 'text-red-600' : 'text-slate-400'}">
-                                                        ${item.balance > 0 ? item.balance.toLocaleString() : '-'}
-                                                    </td>
-                                                </tr>
-                                            `)}
-                                        </tbody>
-                                        <tfoot class="bg-slate-50 font-bold border-t border-slate-200">
-                                            <tr>
-                                                <td class="p-3 text-left uppercase text-xs">Total</td>
-                                                <td class="p-3 text-right">${finance.totalDue.toLocaleString()}</td>
-                                                <td class="p-3 text-right text-green-600">${finance.totalPaid.toLocaleString()}</td>
-                                                <td class="p-3 text-right text-red-600 text-lg">${finance.balance.toLocaleString()}</td>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
-                                </div>
-
-                                <!-- Urgent Notice -->
-                                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 print:bg-white print:border-slate-300">
-                                    <p class="text-sm text-amber-900 leading-relaxed">
-                                        <strong class="font-bold">Dear Parent/Guardian,</strong><br />
-                                        This is a friendly reminder that there is an outstanding balance of 
-                                        <strong class="text-lg text-red-600 font-black">${settings.currency} ${finance.balance.toLocaleString()}</strong> 
-                                        on your child's school fees account. Please arrange payment at your earliest convenience to avoid interruption of learning services.
-                                    </p>
-                                </div>
-
-                                <!-- Payment Methods -->
-                                ${(settings.bankName || settings.mpesaPaybill || settings.airtelPaybill) && html`
-                                    <div class="bg-slate-50 rounded-xl p-4 mb-4 border border-slate-200 print:bg-white print:border-slate-300">
-                                        <p class="text-xs font-bold text-slate-500 uppercase mb-3">💳 Official Payment Channels</p>
-                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                            ${settings.bankName && html`
-                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
-                                                    <p class="font-bold text-slate-700 text-sm">🏦 Bank Info</p>
-                                                    <p class="text-xs text-slate-600 font-bold mt-1">${settings.bankName}</p>
-                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.bankAccount || 'N/A'}</p>
-                                                </div>
-                                            `}
-                                            ${settings.mpesaPaybill && html`
-                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
-                                                    <p class="font-bold text-slate-700 text-sm">📱 M-Pesa</p>
-                                                    <p class="text-xs text-slate-600 font-bold mt-1">Paybill: ${settings.mpesaPaybill}</p>
-                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.mpesaAccountName || 'School Fees'}</p>
-                                                </div>
-                                            `}
-                                            ${settings.airtelPaybill && html`
-                                                <div class="bg-white rounded-lg p-3 border border-slate-200">
-                                                    <p class="font-bold text-slate-700 text-sm">📱 Airtel</p>
-                                                    <p class="text-xs text-slate-600 font-bold mt-1">Paybill: ${settings.airtelPaybill}</p>
-                                                    <p class="text-[10px] text-slate-500">A/C: ${settings.airtelAccountName || 'School Fees'}</p>
-                                                </div>
-                                            `}
-                                        </div>
-                                    </div>
-                                `}
-                            </div>
-
-                            <!-- Signatures -->
-                            <div class="p-6 border-t border-slate-200 bg-slate-50 print:bg-white text-slate-800">
-                                <div class="flex justify-between items-end">
-                                    <div class="text-center">
-                                        <div class="h-16 flex items-end justify-center mb-2">
-                                            ${settings.clerkSignature && html`<img src="${settings.clerkSignature}" class="h-14 object-contain" />`}
-                                        </div>
-                                        <div class="w-40 h-0.5 bg-slate-900 mb-1"></div>
-                                        <p class="text-[10px] font-bold uppercase text-slate-800">Authorized Signatory</p>
-                                        <p class="text-[9px] text-slate-500">Accounts Department</p>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="w-16 h-16 opacity-30 flex items-center justify-center mb-2">
-                                            ${settings.schoolLogo && html`<img src="${settings.schoolLogo}" class="w-full h-full object-contain filter grayscale" />`}
-                                        </div>
-                                        <div class="w-32 h-0.5 bg-slate-900 mb-1"></div>
-                                        <p class="text-[10px] font-bold uppercase text-slate-800">School Stamp</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                })}
-            </div>
+            `}</style>
         </div>
     `;
 };
-

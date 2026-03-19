@@ -286,6 +286,15 @@ export const SeniorSchool = ({ data, setData }) => {
                     Administrators can still manually adjust choices if a student changes their specialization stream mid-course.
                 </p>
             </div>
+
+            <!-- Report Footer -->
+            <div class="mt-6 pt-3 border-t border-slate-200 print:border-black">
+                <div class="flex justify-between items-center text-[8px] text-slate-400">
+                    <span>${data.settings.schoolName} - ${data.settings.schoolAddress}</span>
+                    <span>Academic Year: ${data.settings.academicYear}</span>
+                    <span>Senior School Pathways - ${filterGrade !== 'ALL' ? filterGrade : 'All Grades'}</span>
+                </div>
+            </div>
         </div>
     `;
 };

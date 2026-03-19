@@ -165,6 +165,16 @@ export const Transport = ({ data, setData }) => {
                 </div>
             </div>
 
+            <!-- Print Header -->
+            <div class="hidden print:flex flex-col items-center text-center border-b pb-2 mb-2">
+                <img src="${data.settings.schoolLogo}" class="w-12 h-12 mb-1 object-contain" alt="Logo" />
+                <h1 class="text-xl font-black uppercase text-slate-900">${data.settings.schoolName}</h1>
+                <p class="text-[10px] text-slate-500 font-medium">${data.settings.schoolAddress}</p>
+                <div class="mt-2 border-t border-slate-200 w-full pt-2">
+                    <h2 class="text-sm font-extrabold uppercase tracking-widest text-blue-600">Transport Assignments Register</h2>
+                </div>
+            </div>
+
             <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                 <table class="w-full text-left min-w-[600px]">
                     <thead class="bg-slate-50 border-b">
@@ -193,6 +203,15 @@ export const Transport = ({ data, setData }) => {
                         ${transport.assignments.length === 0 && html`<tr><td colspan="3" class="p-12 text-center text-slate-300">No transport assignments yet</td></tr>`}
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Report Footer -->
+            <div class="mt-6 pt-3 border-t border-slate-200 print:border-black">
+                <div class="flex justify-between items-center text-[8px] text-slate-400">
+                    <span>${data.settings.schoolName} - ${data.settings.schoolAddress}</span>
+                    <span>Academic Year: ${data.settings.academicYear}</span>
+                    <span>Transport Register</span>
+                </div>
             </div>
         </div>
     `;

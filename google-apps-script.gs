@@ -25,7 +25,7 @@ const SHEET_NAMES = {
 
 // Column headers for each sheet
 const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees'];
-const ASSESSMENT_HEADERS = ['id', 'studentId', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
+const ASSESSMENT_HEADERS = ['id', 'studentId', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
 const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
@@ -166,6 +166,47 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
+    // Handle addPayment via GET
+    if (action === 'addPayment' && postData.payment) {
+      const payment = postData.payment;
+      if (!payment.id) {
+        payment.id = 'PAY-' + Date.now();
+      }
+      if (!payment.date) {
+        payment.date = new Date().toISOString().split('T')[0];
+      }
+      response = addRecord(SHEET_NAMES.PAYMENTS, payment, PAYMENT_HEADERS);
+      return ContentService
+        .createTextOutput(JSON.stringify(response))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Handle generic addRecord via GET (fallback)
+    if (action === 'addRecord') {
+      const sheetName = postData.sheetName;
+      const record = postData.record;
+      if (sheetName && record) {
+        let headers = [];
+        switch (sheetName) {
+          case SHEET_NAMES.STUDENTS: headers = STUDENT_HEADERS; break;
+          case SHEET_NAMES.ASSESSMENTS: headers = ASSESSMENT_HEADERS; break;
+          case SHEET_NAMES.ATTENDANCE: headers = ATTENDANCE_HEADERS; break;
+          case SHEET_NAMES.TEACHERS: headers = TEACHER_HEADERS; break;
+          case SHEET_NAMES.STAFF: headers = STAFF_HEADERS; break;
+          case SHEET_NAMES.PAYMENTS: headers = PAYMENT_HEADERS; break;
+        }
+        if (headers.length > 0) {
+          response = addRecord(sheetName, record, headers);
+          return ContentService
+            .createTextOutput(JSON.stringify(response))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify({ success: false, error: 'Invalid sheet or record' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+     
     // Handle deleteRecord via GET (query params)
     if (action === 'deleteRecord') {
       const sheetName = e.parameter.sheetName || postData.sheetName;
@@ -199,14 +240,15 @@ function doGet(e) {
       }
     }
     
-    switch (action) {
+      switch (action) {
       case 'getAll':
         response = {
           students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
           assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
           attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
           teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
-          staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS)
+          staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
+          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS)
         };
         break;
         
@@ -519,6 +561,26 @@ function doPost(e) {
         response = getActiveUsers();
         break;
         
+      case 'syncAllToGoogle':
+        // Batch push ALL data for ALL sheets
+        if (!data.data || !data.headers) {
+          response = { success: false, error: 'Missing data or headers' };
+          break;
+        }
+        
+        const results = {};
+        for (const [key, records] of Object.entries(data.data)) {
+          const sheetKey = key.toUpperCase();
+          const sheetName = SHEET_NAMES[sheetKey];
+          const headers = data.headers[key];
+          
+          if (sheetName && headers) {
+            results[key] = bulkPushRecords(sheetName, records, headers);
+          }
+        }
+        response = { success: true, message: 'Batch sync complete', results };
+        break;
+        
       default:
         response = { error: 'Unknown action' };
     }
@@ -570,135 +632,117 @@ function getAllRecords(sheetName, headers) {
 }
 
 /**
- * Add a new record
+ * Add or Update a record (Robust Upsert)
  */
 function addRecord(sheetName, record, headers) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
+  let sheet = ss.getSheetByName(sheetName);
   
   if (!sheet) {
-    return { success: false, error: 'Sheet not found' };
-  }
-  
-  // Ensure headers exist
-  const existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  if (existingHeaders.length === 0) {
+    sheet = ss.insertSheet(sheetName);
     sheet.appendRow(headers);
   }
   
-  // Try to update existing record if the id field matches
-  const idIndex = headers.indexOf('id');
-  if (idIndex >= 0 && record.id) {
-    const allValues = sheet.getDataRange().getValues(); // includes header row
-    for (let i = 1; i < allValues.length; i++) {
-      if (allValues[i][idIndex] == record.id) {
-        // found existing row, update
-        const values = headers.map(header => {
-          const val = record[header];
-          return val !== undefined ? val : '';
-        });
-        sheet.getRange(i+1, 1, 1, values.length).setValues([values]);
-        return { success: true, id: record.id, message: 'Record updated successfully' };
-      }
-    }
+  // Obtain script lock for concurrency control
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000); // 30 second timeout
+  } catch (e) {
+    return { success: false, error: 'Could not obtain script lock' };
   }
 
-  // if no existing record found, append new one
-  const values = headers.map(header => {
-    const val = record[header];
-    return val !== undefined ? val : '';
-  });
-  
-  sheet.appendRow(values);
-  
-  return { 
-    success: true, 
-    id: record.id || values[0],
-    message: 'Record added successfully' 
-  };
+  try {
+    // Ensure we have a valid ID
+    if (!record.id) {
+      if (sheetName === SHEET_NAMES.STUDENTS && record.admissionNo) {
+        record.id = record.admissionNo;
+      } else {
+        record.id = 'REC-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+      }
+    }
+
+    const idIndex = headers.indexOf('id');
+    const admissionIndex = headers.indexOf('admissionNo');
+    
+    if (idIndex === -1) {
+      return { success: false, error: 'Table headers missing "id" field' };
+    }
+
+    // Get all data to find existing record
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+
+    // Strict search for existing ID
+    for (let i = 1; i < data.length; i++) {
+      const rowId = String(data[i][idIndex] || '').trim();
+      const searchId = String(record.id).trim();
+      
+      // For students, also check admissionNo if ID doesn't match
+      let admissionMatch = false;
+      if (sheetName === SHEET_NAMES.STUDENTS && admissionIndex >= 0) {
+        const rowAdm = String(data[i][admissionIndex] || '').trim();
+        const searchAdm = String(record.admissionNo || '').trim();
+        if (searchAdm && rowAdm === searchAdm) admissionMatch = true;
+      }
+
+      if (rowId === searchId || admissionMatch) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+
+    // Prepare row values
+    const rowValues = headers.map(header => {
+      let val = record[header];
+      if (val === undefined || val === null) return '';
+      if (typeof val === 'object') return JSON.stringify(val);
+      return val;
+    });
+
+    if (rowIndex > 0) {
+      // Update existing row
+      sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowValues]);
+      return { success: true, id: record.id, message: 'Record updated', action: 'update', rowIndex };
+    } else {
+      // Append new row
+      sheet.appendRow(rowValues);
+      return { success: true, id: record.id, message: 'Record added', action: 'add' };
+    }
+  } finally {
+    // Release the lock
+    lock.releaseLock();
+  }
 }
 
 /**
  * Update an existing record
  */
 function updateRecord(sheetName, keyField, keyValue, record, headers) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-  
-  if (!sheet) {
-    return { success: false, error: 'Sheet not found' };
-  }
-  
-  const data = sheet.getDataRange().getValues();
-  const keyIndex = headers.indexOf(keyField);
-  
-  if (keyIndex === -1) {
-    return { success: false, error: 'Key field not found' };
-  }
-  
-  // Find row (skip header)
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][keyIndex]) === String(keyValue)) {
-      // Update the row
-      headers.forEach((header, index) => {
-        sheet.getRange(i + 1, index + 1).setValue(record[header] || '');
-      });
-      
-      return { success: true, message: 'Record updated successfully' };
-    }
-  }
-  
-  return { success: false, error: 'Record not found' };
+  // Reuse robust addRecord for updates too
+  record[keyField] = keyValue;
+  return addRecord(sheetName, record, headers);
 }
 
 /**
- * Bulk add records
+ * Bulk add records - deprecated in favor of bulkPushRecords
  */
 function bulkAddRecords(sheetName, records, headers) {
-  if (!records || records.length === 0) {
-    return { success: true, message: 'No records to add' };
-  }
-  
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-  
-  if (!sheet) {
-    return { success: false, error: 'Sheet not found' };
-  }
-  
-  const values = records.map(record => {
-    return headers.map(header => {
-      const val = record[header];
-      return val !== undefined ? val : '';
-    });
-  });
-  
-  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
-  
-  return { 
-    success: true, 
-    count: records.length,
-    message: `${records.length} records added successfully` 
-  };
+  return bulkPushRecords(sheetName, records, headers);
 }
 
 /**
  * Replace all records in a sheet (clear and write fresh)
  */
 function replaceAllRecords(sheetName, records, headers) {
-  if (!records) {
-    records = [];
-  }
+  if (!records) records = [];
   
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(sheetName);
   
-  // Create sheet if it doesn't exist
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
     sheet.appendRow(headers);
   } else {
-    // Clear existing data (keep headers)
     const lastRow = sheet.getLastRow();
     if (lastRow > 1) {
       sheet.deleteRows(2, lastRow - 1);
@@ -709,10 +753,24 @@ function replaceAllRecords(sheetName, records, headers) {
     return { success: true, count: 0, message: 'Sheet cleared' };
   }
   
-  const values = records.map(record => {
+  // Deduplicate before writing
+  const uniqueRecords = [];
+  const seenIds = new Set();
+  
+  records.forEach(r => {
+    const rId = String(r.id || r.admissionNo || '');
+    if (rId && !seenIds.has(rId)) {
+      seenIds.add(rId);
+      uniqueRecords.push(r);
+    }
+  });
+
+  const values = uniqueRecords.map(record => {
     return headers.map(header => {
-      const val = record[header];
-      return val !== undefined ? val : '';
+      let val = record[header];
+      if (val === undefined || val === null) return '';
+      if (typeof val === 'object') return JSON.stringify(val);
+      return val;
     });
   });
   
@@ -720,13 +778,14 @@ function replaceAllRecords(sheetName, records, headers) {
   
   return { 
     success: true, 
-    count: records.length,
-    message: `${records.length} records written to ${sheetName}` 
+    count: uniqueRecords.length,
+    message: `${uniqueRecords.length} records written to ${sheetName}` 
   };
 }
 
 /**
- * Bulk push records - fast batch add/update for multiple records
+ * Bulk push records - High-performance upsert logic
+ * Prevents duplicates by mapping IDs and admission numbers
  */
 function bulkPushRecords(sheetName, records, headers) {
   if (!records || records.length === 0) {
@@ -742,59 +801,81 @@ function bulkPushRecords(sheetName, records, headers) {
   }
   
   try {
-    const existingData = sheet.getDataRange().getValues();
+    const fullData = sheet.getDataRange().getValues();
     const idIndex = headers.indexOf('id');
-    const keyIndex = sheetName === SHEET_NAMES.STUDENTS ? headers.indexOf('admissionNo') : -1;
+    const admissionIndex = sheetName === SHEET_NAMES.STUDENTS ? headers.indexOf('admissionNo') : -1;
     
-    let updatedCount = 0;
-    let addedCount = 0;
+    // Build lookup maps for existing rows
+    const idMap = new Map();
+    const admMap = new Map();
     
-    // Build a map of existing records for faster lookup
-    const existingMap = new Map();
-    for (let i = 1; i < existingData.length; i++) {
-      if (idIndex >= 0 && existingData[i][idIndex]) {
-        existingMap.set(String(existingData[i][idIndex]), i);
-      } else if (keyIndex >= 0 && existingData[i][keyIndex]) {
-        existingMap.set(String(existingData[i][keyIndex]), i);
+    for (let i = 1; i < fullData.length; i++) {
+      const rowId = String(fullData[i][idIndex] || '').trim();
+      if (rowId) idMap.set(rowId, i + 1);
+      
+      if (admissionIndex >= 0) {
+        const rowAdm = String(fullData[i][admissionIndex] || '').trim();
+        if (rowAdm) admMap.set(rowAdm, i + 1);
       }
     }
     
-    // Batch updates
+    let updatedCount = 0;
+    let addedCount = 0;
     const newRows = [];
     
-    for (const record of records) {
-      const recordId = String(record.id || record[headers[0]] || '');
-      const recordKey = keyIndex >= 0 ? String(record[headers[keyIndex]] || '') : recordId;
-      const lookupKey = keyIndex >= 0 ? recordKey : recordId;
-      const existingRowIndex = existingMap.get(lookupKey);
+    // Filter duplicates within the incoming batch itself
+    const batchSeenIds = new Set();
+    const uniqueIncoming = records.filter(r => {
+      const rId = String(r.id || r.admissionNo || '');
+      if (batchSeenIds.has(rId)) return false;
+      batchSeenIds.add(rId);
+      return true;
+    });
+
+    for (const record of uniqueIncoming) {
+      const recordId = String(record.id || '').trim();
+      const recordAdm = admissionIndex >= 0 ? String(record.admissionNo || '').trim() : '';
       
-      const values = headers.map(h => record[h] || '');
+      // Find row index (lookup by ID then by AdmissionNo for students)
+      let rowIndex = idMap.get(recordId);
+      if (!rowIndex && recordAdm) rowIndex = admMap.get(recordAdm);
       
-      if (existingRowIndex) {
-        // Update existing row
-        sheet.getRange(existingRowIndex + 1, 1, 1, values.length).setValues([values]);
+      const values = headers.map(h => {
+        let val = record[h];
+        if (val === undefined || val === null) return '';
+        if (typeof val === 'object') return JSON.stringify(val);
+        return val;
+      });
+      
+      if (rowIndex) {
+        // Update existing row directly
+        sheet.getRange(rowIndex, 1, 1, headers.length).setValues([values]);
         updatedCount++;
       } else {
-        // Collect new rows for batch insert
+        // Queue for bulk append
         newRows.push(values);
         addedCount++;
       }
     }
     
-    // Batch insert all new rows at once
+    // Batch append new records
     if (newRows.length > 0) {
-      const lastRow = sheet.getLastRow();
-      sheet.getRange(lastRow + 1, 1, newRows.length, headers.length).setValues(newRows);
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, headers.length).setValues(newRows);
     }
     
+    // Release lock
+    try { lock.releaseLock(); } catch (e) {}
+
     return {
       success: true,
-      count: updatedCount + addedCount,
+      total: uniqueIncoming.length,
       updated: updatedCount,
       added: addedCount,
-      message: `Bulk push: ${addedCount} added, ${updatedCount} updated`
+      message: `Sync complete: ${addedCount} added, ${updatedCount} updated`
     };
   } catch (error) {
+    try { lock.releaseLock(); } catch (e) {}
+    console.error('Bulk push failed:', error);
     return { success: false, error: error.message };
   }
 }
