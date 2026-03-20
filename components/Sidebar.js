@@ -4,13 +4,79 @@ import htm from 'htm';
 
 const html = htm.bind(h);
 
-export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMobileOpen, setIsMobileOpen }) => {
-    const [expandedGroups, setExpandedGroups] = useState(['academics', 'finance', 'administration']);
+export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMobileOpen, setIsMobileOpen, isAdmin, teacherSession, onOpenAuth }) => {
+    const [expandedGroups, setExpandedGroups] = useState(['academics']);
+    const [lockedItems, setLockedItems] = useState(new Set());
 
     const toggleGroup = (groupId) => {
         setExpandedGroups(prev => 
             prev.includes(groupId) ? prev.filter(g => g !== groupId) : [...prev, groupId]
         );
+    };
+
+    // Define which items require admin vs teacher access
+    const adminOnlyItems = new Set(['settings', 'fees', 'fees-register', 'fee-reminder', 'payroll', 'teachers', 'staff']);
+    const teacherAccessItems = new Set(['students', 'senior-school', 'assessments', 'attendance', 'marklist', 'timetable', 'result-analysis', 'transport', 'library', 'archives']);
+
+    const isAuthenticated = isAdmin || teacherSession;
+
+    const handleLinkClick = (id) => {
+        // Check if item requires login
+        if (!isAuthenticated) {
+            // Show locked state briefly
+            setLockedItems(prev => new Set([...prev, id]));
+            setTimeout(() => {
+                setLockedItems(prev => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
+            }, 500);
+            
+            // Open auth modal
+            if (onOpenAuth) onOpenAuth();
+            return;
+        }
+
+        // Check admin-only items
+        if (adminOnlyItems.has(id) && !isAdmin) {
+            alert('This feature requires Administrator access. Please login as Admin.');
+            return;
+        }
+
+        setView(id);
+    };
+
+    const renderMenuItem = (item) => {
+        const isLocked = !isAuthenticated || (adminOnlyItems.has(item.id) && !isAdmin);
+        const wasJustLocked = lockedItems.has(item.id);
+        
+        return html`
+            <button
+                type="button"
+                key=${item.id}
+                onClick=${() => handleLinkClick(item.id)}
+                class=${`w-full flex items-center px-4 py-2.5 rounded-xl transition-all duration-200 group relative ${
+                    currentView === item.id ? 'bg-primary text-white shadow-md' : 
+                    wasJustLocked ? 'bg-red-500/20 text-red-400' :
+                    isLocked ? 'text-slate-600 cursor-not-allowed opacity-60' :
+                    'text-slate-400 hover:bg-slate-800 hover:text-white'
+                } ${isLocked && !isCollapsed ? 'pl-3' : ''}`}
+                disabled=${isLocked}
+            >
+                ${isLocked && !isCollapsed && html`<span class="text-xs mr-2">🔒</span>`}
+                ${isLocked && isCollapsed && html`<span class="absolute top-1 right-1 text-[8px]">🔒</span>`}
+                <span class=${`text-lg ${isLocked && !isCollapsed ? 'grayscale opacity-50' : ''}`}>${item.icon}</span>
+                ${!isLocked && !isCollapsed && html`<span class="truncate text-sm font-medium ml-3">${item.label}</span>`}
+                ${isLocked && !isCollapsed && html`<span class="truncate text-sm font-medium ml-3">${item.label}</span>`}
+                ${!isLocked && isCollapsed && html`
+                    <div class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                        ${item.label}
+                        ${adminOnlyItems.has(item.id) ? '🔒' : ''}
+                    </div>
+                `}
+            </button>
+        `;
     };
 
     const navigation = [
@@ -34,10 +100,10 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
             label: 'Finance Office', 
             icon: '💰',
             items: [
-                { id: 'fees', label: 'Collect Fees', icon: '💳' },
-                { id: 'fees-register', label: 'Fee Register', icon: '📋' },
-                { id: 'fee-reminder', label: 'Fee Reminders', icon: '🔔' },
-                { id: 'payroll', label: 'Payroll', icon: '🏦' },
+                { id: 'fees', label: 'Collect Fees', icon: '💳', adminOnly: true },
+                { id: 'fees-register', label: 'Fee Register', icon: '📋', adminOnly: true },
+                { id: 'fee-reminder', label: 'Fee Reminders', icon: '🔔', adminOnly: true },
+                { id: 'payroll', label: 'Payroll', icon: '🏦', adminOnly: true },
             ]
         },
         { 
@@ -45,40 +111,17 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
             label: 'Administration', 
             icon: '🏛️',
             items: [
-                { id: 'teachers', label: 'Teachers', icon: '👨‍🏫' },
-                { id: 'staff', label: 'Support Staff', icon: '🛠️' },
+                { id: 'teachers', label: 'Teachers', icon: '👨‍🏫', adminOnly: true },
+                { id: 'staff', label: 'Support Staff', icon: '🛠️', adminOnly: true },
                 { id: 'transport', label: 'Transport', icon: '🚌' },
                 { id: 'library', label: 'Library', icon: '📚' },
                 { id: 'archives', label: 'Archives', icon: '🗄️' },
             ]
         },
-        { id: 'settings', label: 'Settings', icon: '⚙️' },
+        { id: 'settings', label: 'Settings', icon: '⚙️', adminOnly: true },
     ];
 
-    const handleLinkClick = (id) => {
-        setView(id);
-    };
-
     const isMini = isCollapsed;
-
-    const renderMenuItem = (item) => html`
-        <button
-            type="button"
-            key=${item.id}
-            onClick=${() => handleLinkClick(item.id)}
-            class=${`w-full flex items-center px-4 py-2.5 rounded-xl transition-all duration-200 group relative ${
-                currentView === item.id ? 'bg-primary text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            } ${isMini ? 'justify-center' : ''}`}
-        >
-            <span class=${`text-lg ${isMini ? '' : 'mr-3'}`}>${item.icon}</span>
-            ${!isMini && html`<span class="truncate text-sm font-medium">${item.label}</span>`}
-            ${isMini && html`
-                <div class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                    ${item.label}
-                </div>
-            `}
-        </button>
-    `;
 
     return html`
         <aside class=${`flex flex-col bg-slate-950 text-white h-full overflow-hidden shrink-0 transition-all duration-300 no-print z-[50] shadow-2xl ${
@@ -86,7 +129,10 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
         } ${isMobileOpen ? 'w-64' : ''}`}>
             
             <div class=${`p-4 border-b border-slate-900 flex items-center ${isMini ? 'justify-center' : 'justify-between'}`}>
-                ${(!isMini || isMobileOpen) && html`<span class="font-black text-xs uppercase tracking-tighter text-slate-500">Navigation</span>`}
+                ${(!isMini || isMobileOpen) && html`
+                    <span class="font-black text-xs uppercase tracking-tighter text-slate-500">Navigation</span>
+                    ${!isAuthenticated && html`<span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Locked</span>`}
+                `}
                 <button 
                     type="button"
                     onClick=${() => setCollapsed(!isCollapsed)}
@@ -103,31 +149,55 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                 ${navigation.map(node => {
                     if (node.items) {
                         const isExpanded = expandedGroups.includes(node.id) && !isMini;
+                        const allLocked = !isAuthenticated;
+                        
                         return html`
                             <div class="space-y-1">
                                 <button 
                                     type="button"
                                     onClick=${() => toggleGroup(node.id)}
-                                    class=${`w-full flex items-center p-2 rounded-lg text-slate-500 hover:text-white transition-colors ${isMini ? 'justify-center' : 'justify-between'}`}
+                                    class=${`w-full flex items-center p-2 rounded-lg transition-colors ${isMini ? 'justify-center' : 'justify-between'} ${allLocked ? 'text-slate-600' : 'text-slate-500 hover:text-white'}`}
                                 >
                                     <div class="flex items-center">
-                                        <span class=${`text-lg ${isMini ? '' : 'mr-3'}`}>${node.icon}</span>
-                                        ${!isMini && html`<span class="text-[10px] font-black uppercase tracking-widest">${node.label}</span>`}
+                                        <span class=${`text-lg ${allLocked ? 'grayscale opacity-50' : ''}`}>${node.icon}</span>
+                                        ${!isMini && html`
+                                            <span class="text-[10px] font-black uppercase tracking-widest ml-3">${node.label}</span>
+                                            ${allLocked && html`<span class="ml-2 text-[8px]">🔒</span>`}
+                                        `}
                                     </div>
                                     ${!isMini && html`<span class="text-[8px] transition-transform ${isExpanded ? 'rotate-180' : ''}">▼</span>`}
                                 </button>
                                 ${isExpanded && html`
                                     <div class="pl-2 space-y-1 animate-in slide-in-from-left-2 duration-200">
-                                        ${node.items.map(item => renderMenuItem(item))}
+                                        ${node.items.map(item => {
+                                            const isLocked = !isAuthenticated || (item.adminOnly && !isAdmin);
+                                            return html`
+                                                <button
+                                                    type="button"
+                                                    key=${item.id}
+                                                    onClick=${() => handleLinkClick(item.id)}
+                                                    class=${`w-full flex items-center px-3 py-2 rounded-lg transition-all duration-200 group relative ${
+                                                        currentView === item.id ? 'bg-primary/20 text-primary' :
+                                                        isLocked ? 'text-slate-600 cursor-not-allowed opacity-50' :
+                                                        'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                                    }`}
+                                                >
+                                                    ${isLocked && html`<span class="text-[8px] mr-2">🔒</span>`}
+                                                    <span class="text-sm">${item.icon}</span>
+                                                    <span class="truncate text-xs font-medium ml-2">${item.label}</span>
+                                                    ${item.adminOnly && html`<span class="ml-auto text-[8px] bg-red-500/30 text-red-400 px-1 rounded">Admin</span>`}
+                                                </button>
+                                            `;
+                                        })}
                                     </div>
                                 `}
                                 ${isMini && html`
                                     <div class="flex flex-col gap-1 items-center">
-                                        ${node.items.map(item => html`
+                                        ${node.items.slice(0, 3).map(item => html`
                                             <button 
                                                 type="button"
                                                 onClick=${() => handleLinkClick(item.id)}
-                                                class=${`p-2 rounded-lg transition-all ${currentView === item.id ? 'bg-primary/20 text-primary' : 'text-slate-600 hover:text-slate-300'}`}
+                                                class=${`p-2 rounded-lg transition-all ${currentView === item.id ? 'bg-primary/20 text-primary' : 'text-slate-600'}`}
                                                 title=${item.label}
                                             >
                                                 <span class="text-xs">${item.icon}</span>
@@ -138,17 +208,44 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                             </div>
                         `;
                     }
-                    return renderMenuItem(node);
+                    return html`
+                        <button
+                            type="button"
+                            onClick=${() => handleLinkClick(node.id)}
+                            class=${`w-full flex items-center px-4 py-2.5 rounded-xl transition-all duration-200 group relative ${
+                                currentView === node.id ? 'bg-primary text-white shadow-md' :
+                                (node.adminOnly && !isAdmin && !isAuthenticated) ? 'text-slate-600 opacity-60 cursor-not-allowed' :
+                                'text-slate-400 hover:bg-slate-800 hover:text-white'
+                            } ${isMini ? 'justify-center' : ''}`}
+                        >
+                            ${(node.adminOnly && !isAdmin && !isAuthenticated) && html`<span class="absolute top-1 right-1 text-[8px]">🔒</span>`}
+                            <span class="text-lg">${node.icon}</span>
+                            ${!isMini && html`<span class="truncate text-sm font-medium ml-3">${node.label}</span>`}
+                            ${!isMini && node.adminOnly && html`<span class="ml-auto text-[8px] bg-red-500/30 text-red-400 px-1 rounded">Admin</span>`}
+                            ${isMini && html`
+                                <div class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                                    ${node.label}
+                                </div>
+                            `}
+                        </button>
+                    `;
                 })}
             </nav>
 
             <div class="p-4 border-t border-slate-900 mt-auto">
                 <div class=${`flex items-center ${isMini ? 'justify-center' : 'gap-3'}`}>
-                    <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs">AD</div>
+                    <div class="w-8 h-8 rounded-full ${isAuthenticated ? 'bg-green-600' : 'bg-slate-800'} flex items-center justify-center font-bold text-xs">
+                        ${isAuthenticated ? (isAdmin ? 'AD' : (teacherSession?.name?.[0] || 'T')) : '?'}
+                    </div>
                     ${(!isMini || isMobileOpen) && html`
                         <div class="overflow-hidden">
-                            <p class="text-[10px] font-bold truncate">Administrator</p>
-                            <p class="text-[8px] text-slate-500">Online</p>
+                            ${isAuthenticated ? html`
+                                <p class="text-[10px] font-bold truncate">${isAdmin ? 'Administrator' : (teacherSession?.name || teacherSession?.username || 'Teacher')}</p>
+                                <p class="text-[8px] text-green-400">✓ Logged In</p>
+                            ` : html`
+                                <p class="text-[10px] font-bold truncate text-slate-500">Guest</p>
+                                <p class="text-[8px] text-slate-600">Not logged in</p>
+                            `}
                         </div>
                     `}
                 </div>

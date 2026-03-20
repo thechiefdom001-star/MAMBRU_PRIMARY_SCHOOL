@@ -20,7 +20,8 @@ const SHEET_NAMES = {
   TEACHERS: 'Teachers',
   STAFF: 'Staff',
   PAYMENTS: 'Payments',
-  ACTIVITY: 'Activity'  // For tracking active users
+  ACTIVITY: 'Activity',  // For tracking active users
+  TEACHER_CREDENTIALS: 'TeacherCredentials'  // For teacher login credentials
 };
 
 // Column headers for each sheet
@@ -30,6 +31,7 @@ const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academ
 const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt'];
+const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin'];
 
 /**
  * Sanitize incoming records to prevent injection attacks
@@ -132,6 +134,13 @@ function initializeSheets() {
   if (!activitySheet) {
     activitySheet = ss.insertSheet(SHEET_NAMES.ACTIVITY);
     activitySheet.appendRow(['device', 'lastActivity', 'timestamp']);
+  }
+
+  // Create TeacherCredentials sheet for login system
+  let teacherCredSheet = ss.getSheetByName(SHEET_NAMES.TEACHER_CREDENTIALS);
+  if (!teacherCredSheet) {
+    teacherCredSheet = ss.insertSheet(SHEET_NAMES.TEACHER_CREDENTIALS);
+    teacherCredSheet.appendRow(TEACHER_CREDENTIALS_HEADERS);
   }
   
   return { success: true, message: 'Sheets initialized successfully' };
@@ -396,6 +405,48 @@ function doGet(e) {
         
       case 'getActiveUsers':
         response = getActiveUsers();
+        break;
+        
+      // Teacher Authentication via GET
+      case 'registerTeacher':
+        let regData = {};
+        if (e.parameter.data) {
+          try {
+            regData = JSON.parse(decodeURIComponent(e.parameter.data));
+          } catch (err) {
+            try {
+              regData = JSON.parse(e.parameter.data);
+            } catch (err2) {}
+          }
+        }
+        response = registerTeacher({
+          username: regData.username || e.parameter.username,
+          password: regData.password || e.parameter.password,
+          teacherId: regData.teacherId || e.parameter.teacherId,
+          name: regData.name || e.parameter.name,
+          role: regData.role || e.parameter.role
+        });
+        break;
+        
+      case 'loginTeacher':
+        let loginData = {};
+        if (e.parameter.data) {
+          try {
+            loginData = JSON.parse(decodeURIComponent(e.parameter.data));
+          } catch (err) {
+            try {
+              loginData = JSON.parse(e.parameter.data);
+            } catch (err2) {}
+          }
+        }
+        response = loginTeacher({
+          username: loginData.username || e.parameter.username,
+          password: loginData.password || e.parameter.password
+        });
+        break;
+        
+      case 'getTeacherCredentials':
+        response = { success: true, teachers: getTeacherCredentials() };
         break;
         
       case 'bulkPushStudents':
@@ -682,6 +733,35 @@ function doPost(e) {
         response = { success: true, message: 'Batch sync complete', results };
         break;
         
+      // ═══════════════════════════════════════════════════════════════
+      // TEACHER AUTHENTICATION HANDLERS
+      // ═══════════════════════════════════════════════════════════════
+      
+      case 'registerTeacher':
+        response = registerTeacher({
+          username: data.username,
+          password: data.password,
+          teacherId: data.teacherId,
+          name: data.name,
+          role: data.role
+        });
+        break;
+        
+      case 'loginTeacher':
+        response = loginTeacher({
+          username: data.username,
+          password: data.password
+        });
+        break;
+        
+      case 'getTeacherCredentials':
+        response = { success: true, teachers: getTeacherCredentials() };
+        break;
+        
+      case 'deleteTeacher':
+        response = deleteTeacherAccount(data.username);
+        break;
+        
       default:
         response = { error: 'Unknown action' };
     }
@@ -713,12 +793,15 @@ function getAllRecords(sheetName, headers) {
   const seenIds = new Set();
   const results = [];
   
-  data.forEach(row => {
+  // Skip header row (index 0) - start from row 1
+  for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
+    const row = data[rowIndex];
     let obj = {};
     let idValue = null;
     
-    headers.forEach((header, index) => {
-      let value = row[index];
+    for (let colIndex = 0; colIndex < headers.length; colIndex++) {
+      const header = headers[colIndex];
+      let value = row[colIndex];
       
       // Capture ID for deduplication
       if (header === 'id') {
@@ -736,7 +819,7 @@ function getAllRecords(sheetName, headers) {
       }
       
       obj[header] = value;
-    });
+    }
     
     // For assessments, ensure studentId is properly included even if empty
     if (sheetName === SHEET_NAMES.ASSESSMENTS) {
@@ -745,14 +828,20 @@ function getAllRecords(sheetName, headers) {
       obj.studentName = String(obj.studentName || '');
     }
     
-    // Deduplicate by ID
+    // Deduplicate by ID - skip if idValue is empty or is a header name
     if (idValue && !seenIds.has(idValue)) {
-      seenIds.add(idValue);
-      results.push(obj);
+      // Additional check: ensure it's not a header name like "id", "name", "grade"
+      const headerNames = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees', 
+                          'studentId', 'studentAdmissionNo', 'studentName', 'subject', 'score', 'term',
+                          'examType', 'academicYear', 'date', 'level', 'status'];
+      if (headerNames.indexOf(idValue.toLowerCase()) === -1) {
+        seenIds.add(idValue);
+        results.push(obj);
+      }
     }
-  });
+  }
   
-  console.log(`[Sheet] ${sheetName}: ${data.length} rows → ${results.length} unique records`);
+  console.log(`[Sheet] ${sheetName}: ${data.length - 1} data rows → ${results.length} records`);
   return results;
 }
 
@@ -1343,4 +1432,168 @@ function addMissingColumnsToSheets() {
   }
   
   return { success: true, message: 'Columns added to sheets' };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TEACHER AUTHENTICATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Simple hash function for passwords
+ * Note: In production, use more secure hashing like bcrypt
+ */
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(16);
+}
+
+/**
+ * Register a new teacher account
+ * action=registerTeacher
+ */
+function registerTeacher(credentials) {
+  const { username, password, teacherId, name, role } = credentials;
+  
+  if (!username || !password) {
+    return { success: false, error: 'Username and password are required' };
+  }
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let credSheet = ss.getSheetByName(SHEET_NAMES.TEACHER_CREDENTIALS);
+  
+  if (!credSheet) {
+    credSheet = ss.insertSheet(SHEET_NAMES.TEACHER_CREDENTIALS);
+    credSheet.appendRow(TEACHER_CREDENTIALS_HEADERS);
+  }
+  
+  // Check if username already exists
+  const data = credSheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === String(username).toLowerCase()) {
+      return { success: false, error: 'Username already exists' };
+    }
+  }
+  
+  // Create new credential record
+  const passwordHash = simpleHash(password);
+  const now = new Date().toISOString();
+  
+  credSheet.appendRow([
+    username.toLowerCase().trim(),
+    passwordHash,
+    teacherId || '',
+    name || username,
+    role || 'teacher',
+    now,
+    ''  // lastLogin - empty initially
+  ]);
+  
+  return { 
+    success: true, 
+    message: 'Account created successfully',
+    username: username.toLowerCase().trim(),
+    role: role || 'teacher'
+  };
+}
+
+/**
+ * Login teacher - validate credentials
+ * action=loginTeacher
+ */
+function loginTeacher(credentials) {
+  const { username, password } = credentials;
+  
+  if (!username || !password) {
+    return { success: false, error: 'Username and password are required' };
+  }
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const credSheet = ss.getSheetByName(SHEET_NAMES.TEACHER_CREDENTIALS);
+  
+  if (!credSheet) {
+    return { success: false, error: 'Credentials system not initialized' };
+  }
+  
+  const data = credSheet.getDataRange().getValues();
+  const passwordHash = simpleHash(password);
+  
+  for (let i = 1; i < data.length; i++) {
+    const storedUsername = String(data[i][0] || '').toLowerCase();
+    const storedHash = String(data[i][1] || '');
+    const storedTeacherId = String(data[i][2] || '');
+    const storedName = String(data[i][3] || '');
+    const storedRole = String(data[i][4] || 'teacher');
+    
+    if (storedUsername === username.toLowerCase().trim() && storedHash === passwordHash) {
+      // Update last login
+      credSheet.getRange(i + 1, 7).setValue(new Date().toISOString());
+      
+      return { 
+        success: true, 
+        message: 'Login successful',
+        username: storedUsername,
+        teacherId: storedTeacherId,
+        name: storedName,
+        role: storedRole
+      };
+    }
+  }
+  
+  return { success: false, error: 'Invalid username or password' };
+}
+
+/**
+ * Get teacher credentials (for admin to see)
+ * action=getTeachers
+ */
+function getTeacherCredentials() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const credSheet = ss.getSheetByName(SHEET_NAMES.TEACHER_CREDENTIALS);
+  
+  if (!credSheet) return [];
+  
+  const data = credSheet.getDataRange().getValues();
+  const results = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    results.push({
+      username: data[i][0],
+      teacherId: data[i][2],
+      name: data[i][3],
+      role: data[i][4],
+      createdAt: data[i][5],
+      lastLogin: data[i][6]
+    });
+  }
+  
+  return results;
+}
+
+/**
+ * Delete teacher account
+ * action=deleteTeacher
+ */
+function deleteTeacherAccount(username) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const credSheet = ss.getSheetByName(SHEET_NAMES.TEACHER_CREDENTIALS);
+  
+  if (!credSheet) {
+    return { success: false, error: 'Credentials sheet not found' };
+  }
+  
+  const data = credSheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === String(username).toLowerCase()) {
+      credSheet.deleteRow(i + 1);
+      return { success: true, message: 'Account deleted' };
+    }
+  }
+  
+  return { success: false, error: 'Account not found' };
 }

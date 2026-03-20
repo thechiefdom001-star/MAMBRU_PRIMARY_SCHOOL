@@ -20,6 +20,7 @@ import { Archives } from './components/Archives.js';
 import { Settings } from './components/Settings.js';
 import { Attendance } from './components/Attendance.js';
 import { Sidebar } from './components/Sidebar.js';
+import { TeacherAuth } from './components/TeacherAuth.js';
 import { Storage } from './lib/storage.js';
 import { googleSheetSync } from './lib/googleSheetSync.js';
 
@@ -37,15 +38,39 @@ const App = () => {
     const [selectedStudentId, setSelectedStudentId] = useState(null);
     const [isAdmin, setIsAdmin] = useState(localStorage.getItem('et_is_admin') === 'true');
     
+    // Teacher authentication state
+    const [teacherSession, setTeacherSession] = useState(() => {
+        const saved = localStorage.getItem('et_teacher_session');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const [showTeacherAuth, setShowTeacherAuth] = useState(false);
+    
+    // Derived authentication state
+    const isAuthenticated = isAdmin || teacherSession;
+    
     // Derive selectedStudent from data.students to ensure it's always fresh
     const selectedStudent = selectedStudentId 
         ? (data.students || []).find(s => String(s.id) === String(selectedStudentId)) || null
         : null;
     
+    // Check for existing teacher session on load
+    useEffect(() => {
+        const saved = localStorage.getItem('et_teacher_session');
+        if (saved) {
+            try {
+                const session = JSON.parse(saved);
+                if (session.username && session.isTeacher) {
+                    setTeacherSession(session);
+                }
+            } catch (e) {
+                localStorage.removeItem('et_teacher_session');
+            }
+        }
+    }, []);
+
     // Sync selectedStudentId when data.students changes (e.g., after Google sync)
     useEffect(() => {
         if (selectedStudentId && !selectedStudent) {
-            // Student no longer exists in data, clear selection
             console.log('Selected student no longer found in data, clearing selection');
             setSelectedStudentId(null);
         }
@@ -386,20 +411,37 @@ const App = () => {
         if (loginUsername === 'admin' && loginPassword === 'admin002') {
             setIsAdmin(true);
             localStorage.setItem('et_is_admin', 'true');
-            localStorage.setItem('et_login_username', loginUsername); // Store the logged-in username
+            localStorage.setItem('et_login_username', loginUsername);
             setShowLoginModal(false);
-            setLoginPassword(''); // Only clear password, keep username for device ID
+            setLoginPassword('');
         } else {
             alert('Invalid Admin Credentials');
         }
     };
 
+    const handleTeacherLogin = (teacherData) => {
+        setTeacherSession(teacherData);
+        setShowTeacherAuth(false);
+        console.log('Teacher logged in:', teacherData.username);
+    };
+
     const handleLogout = () => {
         setIsAdmin(false);
-        setLoginUsername(''); // Clear the username
+        setLoginUsername('');
         localStorage.removeItem('et_is_admin');
-        localStorage.removeItem('et_login_username'); // Remove stored login
+        localStorage.removeItem('et_login_username');
+        
+        // Also logout teacher if logged in
+        if (teacherSession) {
+            setTeacherSession(null);
+            localStorage.removeItem('et_teacher_session');
+        }
+        
         setView('dashboard');
+    };
+
+    const openTeacherAuth = () => {
+        setShowTeacherAuth(true);
     };
 
     const navigate = (v, params = null) => {
@@ -748,10 +790,24 @@ const App = () => {
                             <span class="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold uppercase">Admin Mode</span>
                             <button onClick=${handleLogout} class="text-xs font-bold text-red-500 hover:underline uppercase">Logout</button>
                         </div>
+                    ` : teacherSession ? html`
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-bold uppercase flex items-center gap-1">
+                                <span>👩‍🏫</span>
+                                ${teacherSession.name || teacherSession.username}
+                            </span>
+                            <button onClick=${handleLogout} class="text-xs font-bold text-red-500 hover:underline uppercase">Logout</button>
+                        </div>
                     ` : html`
-                        <button onClick=${() => setShowLoginModal(true)} class="bg-primary text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm shadow-blue-200">
-                            Admin Login
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button onClick=${openTeacherAuth} class="bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-sm flex items-center gap-1">
+                                <span>👩‍🏫</span>
+                                <span class="hidden sm:inline">Teacher Login</span>
+                            </button>
+                            <button onClick=${() => setShowLoginModal(true)} class="bg-primary text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm shadow-blue-200">
+                                Admin
+                            </button>
+                        </div>
                     `}
                 </div>
             </header>
@@ -764,15 +820,39 @@ const App = () => {
                     setCollapsed=${setSidebarCollapsed}
                     isMobileOpen=${isMobileMenuOpen}
                     setIsMobileOpen=${setIsMobileMenuOpen}
+                    isAdmin=${isAdmin}
+                    teacherSession=${teacherSession}
+                    onOpenAuth=${openTeacherAuth}
                 />
                 <main class="flex-1 overflow-y-auto no-scrollbar pb-20 md:pb-0">
                     <div class="max-w-6xl mx-auto p-4 md:p-8">
-                        ${!isAdmin && ['settings', 'fees', 'fees-register', 'teachers', 'staff', 'payroll'].includes(view) ? html`
-                            <div class="flex flex-col items-center justify-center h-96 text-center space-y-4">
-                                <span class="text-5xl">🔒</span>
-                                <h2 class="text-xl font-bold">Admin Access Required</h2>
-                                <p class="text-slate-400 max-w-xs">Please log in as an administrator to access financial records and system settings.</p>
-                                <button onClick=${() => setShowLoginModal(true)} class="bg-primary text-white px-6 py-3 rounded-xl font-bold">Login Now</button>
+                        ${!isAuthenticated ? html`
+                            <div class="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
+                                <div class="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-5xl">
+                                    🔒
+                                </div>
+                                <h2 class="text-2xl font-bold text-slate-700">Welcome to EduTrack</h2>
+                                <p class="text-slate-500 max-w-md">Please log in to access the school management system. Use Teacher Login or Admin Login to continue.</p>
+                                <div class="flex gap-3 mt-4">
+                                    <button 
+                                        onClick=${openTeacherAuth} 
+                                        class="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2"
+                                    >
+                                        <span>👩‍🏫</span> Teacher Login
+                                    </button>
+                                    <button 
+                                        onClick=${() => setShowLoginModal(true)} 
+                                        class="bg-green-600 text-white px-6 py-3 rounded-xl font-bold"
+                                    >
+                                        🔐 Admin Login
+                                    </button>
+                                </div>
+                                <button 
+                                    onClick=${() => setView('dashboard')} 
+                                    class="mt-4 text-slate-400 hover:text-slate-600 text-sm"
+                                >
+                                    Continue to Dashboard →
+                                </button>
                             </div>
                         ` : renderView()}
                     </div>
@@ -801,20 +881,30 @@ const App = () => {
                                 <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Password</label>
                                 <input 
                                     type="password"
-                                    placeholder="Enter password..."
+                                    placeholder="Admin password"
                                     class="w-full p-4 bg-slate-50 rounded-2xl border-0 focus:ring-2 focus:ring-primary outline-none"
                                     value=${loginPassword}
                                     onInput=${e => setLoginPassword(e.target.value)}
                                 />
-                                <p class="text-[8px] text-slate-400 mt-1 italic">Ask the admin</p>
                             </div>
-                            <div class="flex gap-3">
-                                <button type="button" onClick=${() => setShowLoginModal(false)} class="flex-1 py-4 text-slate-500 font-bold">Cancel</button>
-                                <button type="submit" class="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-blue-200">Verify</button>
-                            </div>
+                            <button type="submit" class="w-full bg-primary text-white py-4 rounded-2xl font-black text-sm shadow-lg">
+                                Sign In
+                            </button>
+                            <button type="button" onClick=${() => setShowLoginModal(false)} class="w-full text-slate-400 py-2 text-sm">
+                                Cancel
+                            </button>
                         </form>
                     </div>
                 </div>
+            `}
+
+            <!-- Teacher Authentication Modal -->
+            ${showTeacherAuth && html`
+                <${TeacherAuth} 
+                    settings=${data.settings}
+                    onLogin=${handleTeacherLogin}
+                    onClose=${() => setShowTeacherAuth(false)}
+                />
             `}
         </div>
     `;
