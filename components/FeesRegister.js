@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 import { Pagination } from '../lib/pagination.js';
 import { PaginationControls } from './Pagination.js';
 
@@ -114,12 +115,12 @@ export const FeesRegister = ({ data }) => {
 
     return html`
         <div class="space-y-6">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div class="no-print">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 no-print">
+                <div>
                     <h2 class="text-2xl font-bold">Fees Register</h2>
                     <p class="text-slate-500">Comprehensive financial oversight of all students</p>
                 </div>
-                <button onClick=${() => window.print()} class="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm no-print">Print Register</button>
+                <${PrintButtons} />
             </div>
 
             <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 no-print">
@@ -176,7 +177,7 @@ export const FeesRegister = ({ data }) => {
                 <p class="text-[10px] text-slate-400 mt-1">Status: ${showOnlyArrears ? 'Outstanding Balances Only' : 'All Students'}</p>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+            <div class="feesregister-container bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                 <table class="w-full text-left min-w-[800px]">
                         <thead class="bg-slate-800 text-white text-[10px] font-bold uppercase" style="print-color-adjust:exact; -webkit-print-color-adjust:exact;">
                             <tr>

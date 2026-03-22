@@ -21,6 +21,7 @@ import { Settings } from './components/Settings.js';
 import { Attendance } from './components/Attendance.js';
 import { Sidebar } from './components/Sidebar.js';
 import { TeacherAuth } from './components/TeacherAuth.js';
+import { PrintButtons } from './components/PrintButtons.js';
 import { Storage } from './lib/storage.js';
 import { googleSheetSync } from './lib/googleSheetSync.js';
 
@@ -406,6 +407,28 @@ const App = () => {
         }
     }, [data.settings?.primaryColor, data.settings?.secondaryColor, data.settings?.theme]);
 
+    // Report user activity to Google Sheet for "Active Users" visibility
+    useEffect(() => {
+        if (!data.settings.googleScriptUrl) return;
+        
+        let userId = '';
+        if (isAdmin) {
+            userId = `admin@${localStorage.getItem('et_login_username') || 'Administrator'}`;
+        } else if (teacherSession) {
+            userId = `teacher@${teacherSession.name || teacherSession.username}`;
+        }
+        
+        googleSheetSync.setSettings(data.settings);
+        googleSheetSync.setCurrentUser(userId);
+
+        // Keep session alive periodically
+        const interval = setInterval(() => {
+            if (userId) googleSheetSync.setActiveUser(userId);
+        }, 60000);
+        
+        return () => clearInterval(interval);
+    }, [isAdmin, teacherSession, data.settings.googleScriptUrl]);
+
     const handleLogin = (e) => {
         e.preventDefault();
         if (loginUsername === 'admin' && loginPassword === 'admin002') {
@@ -430,6 +453,7 @@ const App = () => {
         setLoginUsername('');
         localStorage.removeItem('et_is_admin');
         localStorage.removeItem('et_login_username');
+        googleSheetSync.setCurrentUser(null);
         
         // Also logout teacher if logged in
         if (teacherSession) {
@@ -525,7 +549,7 @@ const App = () => {
 
     const renderView = () => {
         switch (view) {
-            case 'dashboard': return html`<${Dashboard} data=${data} googleSyncStatus=${googleSyncStatus} />`;
+            case 'dashboard': return html`<${Dashboard} data=${data} googleSyncStatus=${googleSyncStatus} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
             case 'batch-reports': {
                 const [batchTerm, setBatchTerm] = useState('T1');
                 const [batchGrade, setBatchGrade] = useState(selectedStudent?.grade || 'GRADE 1');
@@ -577,9 +601,7 @@ const App = () => {
                                     <option value="T3">Term 3</option>
                                     <option value="FULL">Full Year</option>
                                 </select>
-                                <button onClick=${() => window.print()} class="bg-primary text-white px-6 py-2 rounded-xl font-bold shadow-lg shadow-blue-200">
-                                    🖨️ Print All
-                                </button>
+                                <${PrintButtons} />
                             </div>
                         </div>
                         <div class="space-y-12">
@@ -595,7 +617,7 @@ const App = () => {
             case 'students': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="students" /></div>
-                    <${Students} data=${data} setData=${setData} onSelectStudent=${(id) => navigate('student-detail', { studentId: id })} />
+                    <${Students} data=${data} setData=${setData} onSelectStudent=${(id) => navigate('student-detail', { studentId: id })} isAdmin=${isAdmin} teacherSession=${teacherSession} />
                 </div>
             `;
             case 'teachers': return html`<${Teachers} data=${data} setData=${setData} />`;
@@ -625,7 +647,7 @@ const App = () => {
                     <${ResultAnalysis} data=${data} onSelectStudent=${handleAcademicPrintSelect} />
                 </div>
             `;
-            case 'fees': return html`<${Fees} data=${data} setData=${setData} />`;
+            case 'fees': return html`<${Fees} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
             case 'fees-register': return html`<${FeesRegister} data=${data} />`;
             case 'fee-reminder': return html`<${FeeReminder} data=${data} />`;
             case 'transport': return html`<${Transport} data=${data} setData=${setData} />`;
@@ -634,7 +656,7 @@ const App = () => {
             case 'archives': return html`<${Archives} data=${data} />`;
             case 'settings': return html`<${Settings} data=${data} setData=${setData} />`;
             case 'student-detail': return html`<${StudentDetail} student=${selectedStudent} data=${data} setData=${setData} onBack=${() => setView('students')} />`;
-            default: return html`<${Dashboard} data=${data} googleSyncStatus=${googleSyncStatus} />`;
+            default: return html`<${Dashboard} data=${data} googleSyncStatus=${googleSyncStatus} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
         }
     };
 
@@ -674,8 +696,15 @@ const App = () => {
                 /* GLOBAL PRINT STYLES */
                 @media print {
                     @page {
-                        size: A4 portrait;
                         margin: 10mm;
+                    }
+
+                    body.portrait-mode {
+                        @page { size: portrait; }
+                    }
+
+                    body.landscape-mode {
+                        @page { size: landscape; }
                     }
 
                     * {
@@ -1061,7 +1090,7 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                             <option value="T3">Term 3</option>
                             <option value="FULL">Full Year</option>
                         </select>
-                        <button onClick=${() => window.print()} class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-200">Print Report Card</button>
+                        <${PrintButtons} />
                     </div>
                 </div>
 

@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
 import htm from 'htm';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -109,14 +110,12 @@ export const FeeReminder = ({ data }) => {
                             <p class="text-slate-600 text-sm">Generate professional reminder letters for parents</p>
                         </div>
                     </div>
-                    <div class="flex gap-3 items-center">
-                        <div class="bg-white/40 backdrop-blur px-4 py-2 rounded-xl border border-[#5FD3B3]">
-                            <p class="text-xs text-slate-600 uppercase">Students with Arrears</p>
+                    <div class="flex items-center gap-4">
+                        <div class="bg-white/40 px-4 py-2 rounded-xl backdrop-blur">
+                            <p class="text-[10px] uppercase font-black opacity-60">Students Found</p>
                             <p class="text-xl font-black text-slate-800">${filteredStudents.length}</p>
                         </div>
-                        <button onClick=${() => window.print()} class="bg-slate-800 text-white hover:bg-slate-700 px-6 py-2 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-colors">
-                            <span>🖨️</span> Print All
-                        </button>
+                        <${PrintButtons} />
                     </div>
                 </div>
             </div>

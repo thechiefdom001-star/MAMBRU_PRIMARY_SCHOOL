@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -131,7 +132,7 @@ export const Timetable = ({ data, setData }) => {
                     <button onClick=${() => setShowSlotManager(!showSlotManager)} class=${`flex-1 md:flex-none px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${showSlotManager ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                         Manage Slots/Breaks
                     </button>
-                    <button onClick=${() => window.print()} class="flex-1 md:flex-none bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200">Print</button>
+                    <${PrintButtons} />
                     <button 
                         onClick=${() => setShowAddEntry(!showAddEntry)}
                         class="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm"
@@ -310,7 +311,7 @@ export const Timetable = ({ data, setData }) => {
                     </div>
                 </div>
                 
-                <div class="overflow-x-auto no-scrollbar">
+                <div class="timetable-container overflow-x-auto no-scrollbar">
                     <div class=${`min-w-[${Math.max(800, slots.length * 100)}px] border-l border-t print:border-black`}>
                         <!-- Time Header Row -->
                         <div class="flex bg-slate-100 border-b print:bg-white print:border-black">

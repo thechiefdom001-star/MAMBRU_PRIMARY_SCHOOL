@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -41,6 +42,7 @@ export const Payroll = ({ data, setData }) => {
     const [filterYear,  setFilterYear]  = useState(String(now.getFullYear()));
     const [activePayslip, setActivePayslip] = useState(null);
     const [editingStaff,  setEditingStaff]  = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     const allStaff = useMemo(() => [
         ...(data.teachers || []).map(t => ({ ...t, type: 'Teaching' })),
@@ -97,10 +99,18 @@ export const Payroll = ({ data, setData }) => {
     };
 
     // Build table rows for selected month
-    const tableRows = allStaff.map(staff => {
-        const entry = payroll.find(p => p.staffId === staff.id && p.month === selectedMonth) || null;
-        return { staff, entry };
-    });
+    const tableRows = allStaff
+        .filter(staff => {
+            if (!searchTerm) return true;
+            const searchLower = searchTerm.toLowerCase();
+            return (staff.name && staff.name.toLowerCase().includes(searchLower)) ||
+                   (staff.role && staff.role.toLowerCase().includes(searchLower)) ||
+                   (staff.type && staff.type.toLowerCase().includes(searchLower));
+        })
+        .map(staff => {
+            const entry = payroll.find(p => p.staffId === staff.id && p.month === selectedMonth) || null;
+            return { staff, entry };
+        });
 
     // Column totals for selected month (only entries that exist)
     const totals = tableRows.reduce((acc, { entry: e }) => {
@@ -154,9 +164,17 @@ export const Payroll = ({ data, setData }) => {
                         value=${selectedMonth}
                         onChange=${e => setSelectedMonth(e.target.value)}
                     />
-                    <button onClick=${() => window.print()} class="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium">
-                        Batch Print
-                    </button>
+                    <div class="relative no-print">
+                        <input 
+                            type="text"
+                            placeholder="Search staff..."
+                            class="p-2 pl-8 bg-white border border-slate-200 rounded-xl outline-none w-48 text-sm font-bold"
+                            value=${searchTerm}
+                            onInput=${(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    </div>
+                    <${PrintButtons} />
                 </div>
             </div>
 
@@ -600,9 +618,7 @@ export const Payroll = ({ data, setData }) => {
                         <!-- Modal action bar -->
                         <div class="bg-slate-900 rounded-b-3xl p-4 flex gap-3 no-print">
                             <button onClick=${() => setActivePayslip(null)} class="flex-1 py-3 text-white font-bold hover:bg-slate-700 rounded-xl transition-colors">Close</button>
-                            <button onClick=${() => window.print()} class="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-900 hover:bg-blue-700 transition-colors">
-                                🖨 Print Payslip
-                            </button>
+                            <${PrintButtons} className="flex-1" />
                         </div>
                     </div>
                 </div>

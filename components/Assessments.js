@@ -3,10 +3,11 @@ import { useState, useEffect, useMemo } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const Assessments = ({ data, setData }) => {
+export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
     const [selectedGrade, setSelectedGrade] = useState('GRADE 1');
     const [selectedStream, setSelectedStream] = useState('ALL');
     const [selectedSubject, setSelectedSubject] = useState('');
@@ -14,9 +15,33 @@ export const Assessments = ({ data, setData }) => {
     const [selectedExamType, setSelectedExamType] = useState('Opener');
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncStatus, setSyncStatus] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [historySearchTerm, setHistorySearchTerm] = useState('');
 
     const streams = data?.settings?.streams || [];
     const subjects = Storage.getSubjectsForGrade(selectedGrade);
+
+    // Track activity helper
+    const trackActivity = async (action, assessment, oldData = null) => {
+        if (!data.settings?.googleScriptUrl) return;
+        
+        try {
+            googleSheetSync.setSettings(data.settings);
+            const student = data.students?.find(s => String(s.id) === String(assessment.studentId));
+            
+            await googleSheetSync.trackActivity(
+                action,
+                'Assessments',
+                assessment.id,
+                student?.name || assessment.studentName || 'Unknown Student',
+                `${assessment.subject} - ${assessment.term} ${assessment.examType}: Score ${assessment.score}`,
+                oldData,
+                assessment
+            );
+        } catch (err) {
+            console.warn('Activity tracking failed:', err.message);
+        }
+    };
 
     // Create a robust student lookup map - rebuild when data.students changes
     const studentLookup = useMemo(() => {
@@ -71,12 +96,17 @@ export const Assessments = ({ data, setData }) => {
         }
     }, [selectedGrade]);
     
-    const students = (data?.students || []).filter(s => {
+    const filteredStudents = (data?.students || []).filter(s => {
         const inGrade = s.grade === selectedGrade;
         if (!inGrade) return false;
         
         const inStream = selectedStream === 'ALL' || s.stream === selectedStream;
         if (!inStream) return false;
+
+        const matchesSearch = !searchTerm || 
+            (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (s.admissionNo && s.admissionNo.toLowerCase().includes(searchTerm.toLowerCase()));
+        if (!matchesSearch) return false;
         
         // For Senior School, filter students by their chosen electives
         const seniorGrades = ['GRADE 10', 'GRADE 11', 'GRADE 12'];
@@ -125,6 +155,10 @@ export const Assessments = ({ data, setData }) => {
             academicYear: academicYear,
             date: new Date().toISOString().split('T')[0]
         };
+        
+        // Track activity
+        const action = existing ? 'EDIT' : 'ADD';
+        trackActivity(action, newAssessment, existing);
         
         // 1. SAVE LOCALLY FIRST
         const updatedAssessments = [...otherAssessments, newAssessment];
@@ -229,7 +263,14 @@ export const Assessments = ({ data, setData }) => {
     const deleteAssessment = async (assessmentId) => {
         if (!confirm('Delete this assessment record?')) return;
         
+        const assessmentToDelete = data.assessments.find(a => a.id === assessmentId);
         const updatedAssessments = data.assessments.filter(a => a.id !== assessmentId);
+        
+        // Track activity before deleting
+        if (assessmentToDelete) {
+            trackActivity('DELETE', assessmentToDelete);
+        }
+        
         setData({ ...data, assessments: updatedAssessments });
         
         // Delete from Google Sheet
@@ -441,6 +482,7 @@ export const Assessments = ({ data, setData }) => {
                         >
                             <span>↓</span> Pull from Sheet
                         </button>
+                        <${PrintButtons} />
                     </div>
                 `}
             </div>
@@ -501,14 +543,27 @@ export const Assessments = ({ data, setData }) => {
                         ${subjects.map(s => html`<option value=${s}>${s}</option>`)}
                     </select>
                 </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Quick Search</label>
+                    <div class="relative">
+                        <input 
+                            type="text"
+                            placeholder="Student name..."
+                            class="p-3 pl-8 bg-white border border-slate-200 rounded-xl outline-none w-full md:w-48 text-sm"
+                            value=${searchTerm}
+                            onInput=${(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    </div>
+                </div>
             </div>
 
             <div class="bg-white rounded-2xl border border-slate-100 shadow-sm">
-                ${students.length === 0 ? html`
-                    <div class="p-12 text-center text-slate-400">No students found in this grade.</div>
+                ${filteredStudents.length === 0 ? html`
+                    <div class="p-12 text-center text-slate-400">No students found matching your filters/search.</div>
                 ` : html`
                     <div class="divide-y divide-slate-50">
-                        ${students.map(student => {
+                        ${filteredStudents.map(student => {
                             const assessment = data.assessments.find(a => 
                                 (String(a.studentId) === String(student.id) || 
                                  String(a.studentId) === String(student.admissionNo) ||
@@ -568,10 +623,24 @@ export const Assessments = ({ data, setData }) => {
             </div>
 
             <div class="space-y-3 mt-8">
-                <h3 class="text-lg font-bold">Assessment Records (All Entries)</h3>
-                <p class="text-xs text-slate-500">View, edit, and delete all assessment entries</p>
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h3 class="text-lg font-bold">Assessment Records (All Entries)</h3>
+                        <p class="text-xs text-slate-500">View, edit, and delete all assessment entries</p>
+                    </div>
+                    <div class="relative no-print">
+                        <input 
+                            type="text"
+                            placeholder="Search records..."
+                            class="p-2 pl-8 bg-slate-50 border border-slate-100 rounded-lg outline-none w-64 text-xs font-bold"
+                            value=${historySearchTerm}
+                            onInput=${(e) => setHistorySearchTerm(e.target.value)}
+                        />
+                        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    </div>
+                </div>
                 
-                <div class="overflow-x-auto">
+                <div class="assessments-container overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="bg-slate-50 border-b border-slate-200">
@@ -585,58 +654,78 @@ export const Assessments = ({ data, setData }) => {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                            ${data.assessments.length === 0 ? html`
-                                <tr>
-                                    <td colspan="7" class="px-4 py-6 text-center text-slate-400">No assessment records yet</td>
-                                </tr>
-                            ` : data.assessments.map(assessment => {
-                                const student = findStudentForAssessment(assessment);
-                                return html`
-                                    <tr key=${assessment.id} class="hover:bg-blue-50">
-                                        <td class="px-4 py-3">${student?.name || assessment.studentName || 'Unknown'}</td>
-                                        <td class="px-4 py-3">${assessment.subject}</td>
-                                        <td class="px-4 py-3">${assessment.term}</td>
-                                        <td class="px-4 py-3">${assessment.examType}</td>
-                                        <td class="px-4 py-3 text-center font-bold">
-                                            <input 
-                                                type="number" 
-                                                min="0" 
-                                                max="100"
-                                                value=${assessment.score}
-                                                onChange=${(e) => {
-                                                    // 1. SAVE LOCALLY FIRST
-                                                    const updated = {
-                                                        ...assessment,
-                                                        score: Number(e.target.value),
-                                                        level: Storage.getGradeInfo(Number(e.target.value)).level
-                                                    };
-                                                    const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
-                                                    setData({ ...data, assessments: updatedAssessments });
-                                                    console.log('Score updated locally:', assessment.id);
-                                                    
-                                                    // 2. SYNC TO GOOGLE (silent)
-                                                    if (data.settings?.googleScriptUrl) {
-                                                        syncToGoogleSilent(updated).catch(() => {});
-                                                    }
-                                                }}
-                                                class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </td>
-                                        <td class="px-4 py-3 text-center">
-                                            <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">${assessment.level}</span>
-                                        </td>
-                                        <td class="px-4 py-3 text-center">
-                                            <button 
-                                                onClick=${() => deleteAssessment(assessment.id)}
-                                                title="Delete assessment"
-                                                class="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded text-xs font-bold"
-                                            >
-                                                Delete
-                                            </button>
-                                        </td>
+                            ${data.assessments
+                                .filter(a => {
+                                    if (!historySearchTerm) return true;
+                                    const s = findStudentForAssessment(a);
+                                    const searchLower = historySearchTerm.toLowerCase();
+                                    return (s && s.name && s.name.toLowerCase().includes(searchLower)) ||
+                                           (a.studentName && a.studentName.toLowerCase().includes(searchLower)) ||
+                                           (a.subject && a.subject.toLowerCase().includes(searchLower)) ||
+                                           (a.term && a.term.toLowerCase().includes(searchLower));
+                                })
+                                .length === 0 ? html`
+                                    <tr>
+                                        <td colspan="7" class="px-4 py-6 text-center text-slate-400">No matching assessment records found</td>
                                     </tr>
-                                `;
-                            })}
+                                ` : data.assessments
+                                    .filter(a => {
+                                        if (!historySearchTerm) return true;
+                                        const s = findStudentForAssessment(a);
+                                        const searchLower = historySearchTerm.toLowerCase();
+                                        return (s && s.name && s.name.toLowerCase().includes(searchLower)) ||
+                                               (a.studentName && a.studentName.toLowerCase().includes(searchLower)) ||
+                                               (a.subject && a.subject.toLowerCase().includes(searchLower)) ||
+                                               (a.term && a.term.toLowerCase().includes(searchLower));
+                                    })
+                                    .slice().reverse().map(assessment => {
+                                        const student = findStudentForAssessment(assessment);
+                                        return html`
+                                            <tr key=${assessment.id} class="hover:bg-blue-50">
+                                                <td class="px-4 py-3">${student?.name || assessment.studentName || 'Unknown'}</td>
+                                                <td class="px-4 py-3">${assessment.subject}</td>
+                                                <td class="px-4 py-3">${assessment.term}</td>
+                                                <td class="px-4 py-3">${assessment.examType}</td>
+                                                <td class="px-4 py-3 text-center font-bold">
+                                                    <input 
+                                                        type="number" 
+                                                        min="0" 
+                                                        max="100"
+                                                        value=${assessment.score}
+                                                        onChange=${(e) => {
+                                                            // 1. SAVE LOCALLY FIRST
+                                                            const updated = {
+                                                                ...assessment,
+                                                                score: Number(e.target.value),
+                                                                level: Storage.getGradeInfo(Number(e.target.value)).level
+                                                            };
+                                                            const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
+                                                            setData({ ...data, assessments: updatedAssessments });
+                                                            console.log('Score updated locally:', assessment.id);
+                                                            
+                                                            // 2. SYNC TO GOOGLE (silent)
+                                                            if (data.settings?.googleScriptUrl) {
+                                                                syncToGoogleSilent(updated).catch(() => {});
+                                                            }
+                                                        }}
+                                                        class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                                                    />
+                                                </td>
+                                                <td class="px-4 py-3 text-center">
+                                                    <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">${assessment.level}</span>
+                                                </td>
+                                                <td class="px-4 py-3 text-center">
+                                                    <button 
+                                                        onClick=${() => deleteAssessment(assessment.id)}
+                                                        title="Delete assessment"
+                                                        class="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded text-xs font-bold"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    })}
                         </tbody>
                     </table>
                 </div>

@@ -4,10 +4,12 @@ import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { paymentService } from '../lib/paymentService.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
+import { PrintButtons } from './PrintButtons.js';
+import { PrintService } from '../lib/printService.js';
 
 const html = htm.bind(h);
 
-export const Fees = ({ data, setData }) => {
+export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
     const [selectedStudentId, setSelectedStudentId] = useState('');
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [filterGrade, setFilterGrade] = useState('ALL');
@@ -22,8 +24,29 @@ export const Fees = ({ data, setData }) => {
     const [promptMethod, setPromptMethod] = useState('mpesa');
     const [promptStatus, setPromptStatus] = useState('');
     const [syncStatus, setSyncStatus] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
 
     const streams = (data && data.settings && data.settings.streams) || [];
+
+    // Track activity helper
+    const trackActivity = async (action, payment, studentName = '') => {
+        if (!data.settings?.googleScriptUrl) return;
+        
+        try {
+            googleSheetSync.setSettings(data.settings);
+            await googleSheetSync.trackActivity(
+                action,
+                action === 'VOID' ? 'Fees' : 'Payments',
+                payment.id,
+                studentName || 'Unknown',
+                `KES ${payment.amount.toLocaleString()} - ${payment.term} | Receipt: ${payment.receiptNo}`,
+                null,
+                payment
+            );
+        } catch (err) {
+            console.warn('Activity tracking failed:', err.message);
+        }
+    };
 
     const defaultFeeColumns = [
         { key: 'previousArrears', label: 'Arrears B/F' },
@@ -149,6 +172,9 @@ export const Fees = ({ data, setData }) => {
             date: new Date().toISOString().split('T')[0],
             receiptNo: 'RCP-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0')
         };
+
+        // Track activity
+        trackActivity('ADD', newPayment, student.name);
 
         const financials = Storage.getStudentFinancials(student, data.payments, data.settings);
         const balanceAfter = financials.balance - totalAmount;
@@ -310,6 +336,9 @@ export const Fees = ({ data, setData }) => {
 
         if (!confirm(confirmMsg)) return;
 
+        // Track activity before voiding
+        trackActivity('VOID', payment, student?.name || 'Unknown');
+
         // Mark payment as void instead of deleting
         const updatedPayments = data.payments.map(p => {
             if (p.id === paymentId) {
@@ -375,16 +404,18 @@ export const Fees = ({ data, setData }) => {
         alert('Payment restored successfully!');
     };
 
-    const handlePrintReceipt = () => {
-        document.body.classList.add('print-receipt-only');
+    const handlePrintReceipt = (orientation = 'portrait') => {
+        document.body.classList.remove('portrait-mode', 'landscape-mode');
+        document.body.classList.add('print-receipt-only', `${orientation}-mode`);
         window.print();
-        setTimeout(() => document.body.classList.remove('print-receipt-only'), 500);
+        setTimeout(() => document.body.classList.remove('print-receipt-only', 'portrait-mode', 'landscape-mode'), 500);
     };
 
-    const handlePrintTable = () => {
-        document.body.classList.add('print-table-only');
+    const handlePrintTable = (orientation = 'portrait') => {
+        document.body.classList.remove('portrait-mode', 'landscape-mode');
+        document.body.classList.add('print-table-only', `${orientation}-mode`);
         window.print();
-        setTimeout(() => document.body.classList.remove('print-table-only'), 500);
+        setTimeout(() => document.body.classList.remove('print-table-only', 'portrait-mode', 'landscape-mode'), 500);
     };
 
     return html`
@@ -847,9 +878,14 @@ export const Fees = ({ data, setData }) => {
                                 <p class="text-[10px] italic">Thank you for your payment.</p>
                             </div>
                             
-                            <button onClick=${handlePrintReceipt} class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold no-print shadow-lg shadow-blue-500/30">
-                                Print Receipt
-                            </button>
+                            <div class="flex gap-2">
+                                <button onClick=${() => handlePrintReceipt('portrait')} class="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold no-print shadow-lg shadow-blue-500/30">
+                                    📄 Portrait
+                                </button>
+                                <button onClick=${() => handlePrintReceipt('landscape')} class="flex-1 py-3 bg-blue-700 text-white rounded-xl font-bold no-print shadow-lg shadow-blue-500/30 border-l border-blue-600">
+                                    🖼️ Landscape
+                                </button>
+                            </div>
                         </div>
                     ` : html`
                         <div class="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-50">
@@ -914,12 +950,7 @@ export const Fees = ({ data, setData }) => {
                             </button>
                         `}
                         ${syncStatus && html`<span class="text-xs font-bold ${syncStatus.includes('✓') ? 'text-green-600' : 'text-blue-600'}">${syncStatus}</span>`}
-                        <button 
-                            onClick=${handlePrintTable}
-                            class="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1"
-                        >
-                            🖨️ Print Report
-                        </button>
+                        <${PrintButtons} />
                         <select 
                             class="bg-slate-50 border-0 rounded-lg text-[10px] font-bold uppercase p-2 outline-none focus:ring-1 focus:ring-primary"
                             value=${filterGrade}
@@ -937,10 +968,20 @@ export const Fees = ({ data, setData }) => {
                             <option value="voided">Voided Only</option>
                             <option value="all">Show All</option>
                         </select>
+                        <div class="relative no-print">
+                            <input 
+                                type="text"
+                                placeholder="Search receipt or student..."
+                                class="bg-slate-50 border border-slate-200 text-slate-600 px-3 py-1.5 pl-8 rounded-lg text-[10px] font-bold outline-none focus:ring-1 focus:ring-primary w-48"
+                                value=${searchTerm}
+                                onInput=${(e) => setSearchTerm(e.target.value)}
+                            />
+                            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                        </div>
                         <span class="text-xs text-slate-400">${(data.payments || []).length} Total</span>
                     </div>
                 </div>
-                <div class="overflow-x-auto no-scrollbar">
+                <div class="fees-container overflow-x-auto no-scrollbar">
                     <table class="w-full text-left min-w-[500px]">
                         <thead class="bg-slate-50 text-[10px] font-bold uppercase text-slate-500">
                             <tr>
@@ -963,6 +1004,15 @@ export const Fees = ({ data, setData }) => {
                 // Filter by voided status
                 if (filterVoided === 'active' && p.voided) return false;
                 if (filterVoided === 'voided' && !p.voided) return false;
+                
+                // Search term filter
+                if (searchTerm) {
+                    const s = (data.students || []).find(st => String(st.id) === String(p.studentId));
+                    const searchLower = searchTerm.toLowerCase();
+                    const matchesReceipt = p.receiptNo && p.receiptNo.toLowerCase().includes(searchLower);
+                    const matchesStudent = s && s.name && s.name.toLowerCase().includes(searchLower);
+                    if (!matchesReceipt && !matchesStudent) return false;
+                }
                 return true;
             })
             .slice().reverse().map(p => {

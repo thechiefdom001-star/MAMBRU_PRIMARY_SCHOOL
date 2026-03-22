@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -21,11 +22,14 @@ export const Settings = ({ data, setData }) => {
     const [importSelections, setImportSelections] = useState({
         students: true,
         marks: true,
+        attendance: true,
         staff: true,
         finance: true,
         settings: true,
-        modules: true
+        modules: true,
+        archives: true
     });
+    const [clearExisting, setClearExisting] = useState(false);
     
     const [localSettings, setLocalSettings] = useState(data.settings);
     useEffect(() => {
@@ -153,21 +157,47 @@ export const Settings = ({ data, setData }) => {
 
         let newData = { ...data };
 
+        // Determine if we should clear existing data for unchecked categories
+        const confirmClear = clearExisting;
+
         if (importSelections.students) {
             newData.students = pendingImportData.students || [];
+        } else if (confirmClear) {
+            newData.students = [];
         }
+
         if (importSelections.marks) {
             newData.assessments = pendingImportData.assessments || [];
             newData.remarks = pendingImportData.remarks || [];
+        } else if (confirmClear) {
+            newData.assessments = [];
+            newData.remarks = [];
         }
+
         if (importSelections.staff) {
             newData.teachers = pendingImportData.teachers || [];
             newData.staff = pendingImportData.staff || [];
+        } else if (confirmClear) {
+            newData.teachers = [];
+            newData.staff = [];
         }
+
+        if (importSelections.attendance) {
+            newData.attendance = pendingImportData.attendance || [];
+        } else if (confirmClear) {
+            newData.attendance = [];
+        }
+
         if (importSelections.finance) {
             newData.payments = pendingImportData.payments || [];
             newData.payroll = pendingImportData.payroll || [];
+            newData.paymentPrompts = pendingImportData.paymentPrompts || [];
+        } else if (confirmClear) {
+            newData.payments = [];
+            newData.payroll = [];
+            newData.paymentPrompts = [];
         }
+
         if (importSelections.settings) {
             newData.settings = { 
                 ...pendingImportData.settings,
@@ -175,15 +205,26 @@ export const Settings = ({ data, setData }) => {
                 schoolLogo: pendingImportData.settings?.schoolLogo || settings.schoolLogo
             };
         }
+        // Note: Settings are usually required, so we don't clear them if unchecked
+
         if (importSelections.modules) {
             newData.transport = pendingImportData.transport || { routes: [], assignments: [] };
             newData.library = pendingImportData.library || { books: [], transactions: [] };
+        } else if (confirmClear) {
+            newData.transport = { routes: [], assignments: [] };
+            newData.library = { books: [], transactions: [] };
+        }
+
+        if (importSelections.archives) {
+            newData.archives = pendingImportData.archives || [];
+        } else if (confirmClear) {
+            newData.archives = [];
         }
 
         setData(newData);
         setShowImportModal(false);
         setPendingImportData(null);
-        alert('Selected data has been imported successfully!');
+        alert('Data integration complete! Selected categories have been updated.');
     };
 
     return html`
@@ -410,12 +451,15 @@ export const Settings = ({ data, setData }) => {
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                     <div class="flex items-center justify-between mb-6">
                         <h3 class="font-bold">Fee Structure per Grade (${settings.currency})</h3>
-                        <button 
-                            onClick=${() => setShowAddNewFeeModal(true)}
-                            class="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center gap-1"
-                        >
-                            + Add New Fee
-                        </button>
+                        <div class="flex items-center gap-2">
+                             <${PrintButtons} />
+                            <button 
+                                onClick=${() => setShowAddNewFeeModal(true)}
+                                class="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center gap-1"
+                            >
+                                + Add New Fee
+                            </button>
+                        </div>
                     </div>
                     
                     <!-- Grade Group Cards -->
@@ -800,16 +844,29 @@ export const Settings = ({ data, setData }) => {
                     <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                         <div class="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
                             <h3 class="text-2xl font-black mb-2">Selective Import</h3>
-                            <p class="text-slate-400 text-sm mb-6">Choose which data categories to override. Deselected categories will keep your current data.</p>
+                            <p class="text-slate-400 text-sm mb-6">Choose which data categories to override from the backup file.</p>
+                            
+                            <div class="mb-4 flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-100">
+                                <div>
+                                    <p class="text-[10px] font-black text-red-700 uppercase">Clear existing data</p>
+                                    <p class="text-[9px] text-red-600">Remove local records if unchecked</p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" checked=${clearExisting} onChange=${() => setClearExisting(!clearExisting)} class="sr-only peer" />
+                                    <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                                </label>
+                            </div>
                             
                             <div class="grid grid-cols-1 gap-3 mb-8">
                                 ${[
                                     { id: 'students', label: 'Students Directory', icon: '👥' },
                                     { id: 'marks', label: 'Marks & Assessments', icon: '📝' },
+                                    { id: 'attendance', label: 'Attendance Records', icon: '📅' },
                                     { id: 'staff', label: 'Teachers & Staff', icon: '👨‍🏫' },
                                     { id: 'finance', label: 'Financial Records', icon: '💰' },
                                     { id: 'settings', label: 'System Settings & Fees', icon: '⚙️' },
-                                    { id: 'modules', label: 'Transport & Library', icon: '🚌' }
+                                    { id: 'modules', label: 'Transport & Library', icon: '🚌' },
+                                    { id: 'archives', label: 'Archives (Old Years)', icon: '🗄️' }
                                 ].map(cat => html`
                                     <label class=${`flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer ${
                                         importSelections[cat.id] ? 'border-primary bg-blue-50/50' : 'border-slate-100 hover:border-slate-200'

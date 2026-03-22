@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -184,10 +185,10 @@ export const SeniorSchool = ({ data, setData }) => {
         <div class="space-y-6">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 no-print">
                 <div>
-                    <h2 class="text-2xl font-bold">Senior School Directory</h2>
+                    <h2 class="text-2xl font-bold">Senior School</h2>
                     <p class="text-slate-500">Pathway Management for Grades 10, 11 and 12</p>
                 </div>
-                <button onClick=${() => window.print()} class="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm">Print Allocations</button>
+                <${PrintButtons} />
             </div>
 
             <!-- Filters -->
@@ -222,7 +223,7 @@ export const SeniorSchool = ({ data, setData }) => {
                 <p class="text-[10px] text-slate-400 mt-1">Grade: ${filterGrade} | Generated: ${new Date().toLocaleDateString()}</p>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+            <div class="seniorschool-container bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                 <table class="w-full text-left min-w-[700px]">
                     <thead class="bg-slate-50 border-b text-[10px] font-bold text-slate-500 uppercase">
                         <tr>

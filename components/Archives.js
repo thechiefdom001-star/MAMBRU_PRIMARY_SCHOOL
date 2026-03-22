@@ -10,7 +10,8 @@ const html = htm.bind(h);
 export const Archives = ({ data }) => {
     const [selectedArchive, setSelectedArchive] = useState(null);
     const [activeSubView, setActiveSubView] = useState('summary');
-
+    const [searchTerm, setSearchTerm] = useState('');
+    
     const archives = data.archives || [];
 
     if (selectedArchive) {
@@ -69,14 +70,31 @@ export const Archives = ({ data }) => {
     }
 
     return html`
-        <div class="space-y-6">
-            <div>
-                <h2 class="text-2xl font-bold">Academic Archives</h2>
-                <p class="text-slate-500">Access historical results, marklists and financials from previous years</p>
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold">Academic Archives</h2>
+                    <p class="text-slate-500">Access historical results, marklists and financials from previous years</p>
+                </div>
+                <div class="relative no-print">
+                    <input 
+                        type="text"
+                        placeholder="Search archives..."
+                        class="p-2 pl-8 bg-white border border-slate-200 rounded-xl outline-none w-48 text-sm font-bold"
+                        value=${searchTerm}
+                        onInput=${(e) => setSearchTerm(e.target.value)}
+                    />
+                    <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                </div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                ${archives.map(archive => html`
+                ${archives
+                    .filter(a => {
+                        if (!searchTerm) return true;
+                        const searchLower = searchTerm.toLowerCase();
+                        return a.academicYear && a.academicYear.toLowerCase().includes(searchLower);
+                    })
+                    .map(archive => html`
                     <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
                         <div class="flex justify-between items-start mb-4">
                             <div class="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl group-hover:bg-primary group-hover:text-white transition-colors">

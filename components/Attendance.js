@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
@@ -20,13 +21,22 @@ export const Attendance = ({ data, setData }) => {
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [selectedWeek, setSelectedWeek] = useState(1);
     const [showPrintModal, setShowPrintModal] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
 
     const streams = data?.settings?.streams || [];
 
     const students = (data?.students || []).filter(s => {
-        if (s.grade !== selectedGrade) return false;
-        if (selectedStream === 'ALL') return true;
-        return s.stream === selectedStream;
+        const inGrade = s.grade === selectedGrade;
+        if (!inGrade) return false;
+        
+        const inStream = selectedStream === 'ALL' || s.stream === selectedStream;
+        if (!inStream) return false;
+
+        const matchesSearch = !searchTerm || 
+            (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (s.admissionNo && s.admissionNo.toLowerCase().includes(searchTerm.toLowerCase()));
+        
+        return matchesSearch;
     });
     const weeksInTerm = Storage.getWeeksForTerm(data.settings, selectedTerm);
     const currentWeek = weeksInTerm[selectedWeek - 1] || { dates: [] };
@@ -214,6 +224,16 @@ export const Attendance = ({ data, setData }) => {
                         </button>
                     </div>
                 </div>
+                <div class="mt-4 no-print relative">
+                    <input 
+                        type="text"
+                        placeholder="Search student in this grade..."
+                        class="w-full md:w-64 px-8 py-2 border rounded-lg text-sm bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500"
+                        value=${searchTerm}
+                        onInput=${(e) => setSearchTerm(e.target.value)}
+                    />
+                    <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                </div>
             </div>
 
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -336,7 +356,7 @@ export const Attendance = ({ data, setData }) => {
                             </div>
                         </div>
 
-                        <div class="overflow-x-auto">
+                        <div class="attendance-container overflow-x-auto">
                             <table class="w-full text-xs border-collapse">
                                 <thead>
                                     <tr class="bg-slate-100">
@@ -386,12 +406,7 @@ export const Attendance = ({ data, setData }) => {
                         </div>
 
                         <div class="mt-4 flex gap-2 no-print">
-                            <button 
-                                onClick=${() => window.print()}
-                                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
-                            >
-                                Print
-                            </button>
+                            <${PrintButtons} className="flex-1" />
                             <button 
                                 onClick=${() => setShowPrintModal(false)}
                                 class="px-4 py-2 border rounded-lg"

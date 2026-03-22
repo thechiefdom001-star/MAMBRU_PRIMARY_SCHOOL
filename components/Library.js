@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -12,6 +13,7 @@ export const Library = ({ data, setData }) => {
     
     const [selectedBookId, setSelectedBookId] = useState('');
     const [selectedStudentId, setSelectedStudentId] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
 
     const library = data.library || { books: [], transactions: [] };
     const students = data.students || [];
@@ -182,7 +184,17 @@ export const Library = ({ data, setData }) => {
                     >
                         Borrowing Log
                     </button>
-                    <button onClick=${() => window.print()} class="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm">Print</button>
+                    <div class="relative no-print">
+                        <input 
+                            type="text"
+                            placeholder=${view === 'inventory' ? "Search books..." : "Search logs..."}
+                            class="p-2 pl-8 bg-white border border-slate-200 rounded-xl outline-none w-48 text-sm font-bold"
+                            value=${searchTerm}
+                            onInput=${(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    </div>
+                    <${PrintButtons} />
                 </div>
             </div>
 
@@ -234,7 +246,7 @@ export const Library = ({ data, setData }) => {
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+                    <div class="library-container bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                         <table class="w-full text-left min-w-[700px]">
                             <thead class="bg-slate-50 border-b">
                                 <tr>
@@ -246,7 +258,15 @@ export const Library = ({ data, setData }) => {
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-50">
-                                ${library.books.map(book => html`
+                                ${(library.books || [])
+                                    .filter(book => {
+                                        if (!searchTerm) return true;
+                                        const searchLower = searchTerm.toLowerCase();
+                                        return (book.title && book.title.toLowerCase().includes(searchLower)) ||
+                                               (book.author && book.author.toLowerCase().includes(searchLower)) ||
+                                               (book.isbn && book.isbn.toLowerCase().includes(searchLower));
+                                    })
+                                    .map(book => html`
                                     <tr key=${book.id} class="hover:bg-slate-100 even:bg-slate-50">
                                         <td class="px-6 py-4">
                                             <div class="font-bold text-sm">${book.title}</div>
@@ -323,7 +343,7 @@ export const Library = ({ data, setData }) => {
                         </form>
                     </div>
 
-                    <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+                    <div class="library-container lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                         <table class="w-full text-left min-w-[600px]">
                             <thead class="bg-slate-50 border-b">
                                 <tr>
@@ -334,7 +354,17 @@ export const Library = ({ data, setData }) => {
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-50">
-                                ${library.transactions.slice().reverse().map(t => {
+                                ${(library.transactions || [])
+                                    .slice().reverse()
+                                    .filter(t => {
+                                        if (!searchTerm) return true;
+                                        const book = library.books.find(b => b.id === t.bookId);
+                                        const student = (students || []).find(s => String(s.id) === String(t.studentId));
+                                        const searchLower = searchTerm.toLowerCase();
+                                        return (student && student.name && student.name.toLowerCase().includes(searchLower)) ||
+                                               (book && book.title && book.title.toLowerCase().includes(searchLower));
+                                    })
+                                    .map(t => {
                                     const book = library.books.find(b => b.id === t.bookId);
                                     const student = (students || []).find(s => String(s.id) === String(t.studentId));
                                     const studentName = student && student.name ? student.name : 'Unknown';

@@ -3,16 +3,17 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
+import { ActivityLog } from './ActivityLog.js';
 
 const html = htm.bind(h);
 
-export const Dashboard = ({ data, googleSyncStatus }) => {
+export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) => {
     const students = data?.students || [];
     const payments = data?.payments || [];
     const assessments = data?.assessments || [];
     const settings = data?.settings || { currency: 'KES.', grades: [], feeStructures: [] };
     
-    const [activeUsers, setActiveUsers] = useState(0);
+    const [activeUsers, setActiveUsers] = useState([]);
     const [lastActivity, setLastActivity] = useState(null);
 
     // Check for active users periodically
@@ -25,8 +26,14 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
                 const result = await googleSheetSync.getActiveUsers();
                 
                 if (result.success) {
-                    setActiveUsers(result.activeUsers?.length || 0);
-                    if (result.lastActivity) {
+                    // result.users contains the array of active user objects
+                    setActiveUsers(result.users || []);
+                    if (result.users && result.users.length > 0) {
+                        const mostRecent = result.users.reduce((prev, curr) => 
+                            (parseInt(curr.lastActivity) > parseInt(prev.lastActivity)) ? curr : prev
+                        );
+                        setLastActivity(new Date(parseInt(mostRecent.lastActivity)));
+                } else if (result.lastActivity) {
                         setLastActivity(new Date(parseInt(result.lastActivity)));
                     }
                 }
@@ -309,6 +316,18 @@ export const Dashboard = ({ data, googleSyncStatus }) => {
                         })}
                     </div>
                 </div>
+
+                <!-- Activity Log -->
+                ${isAdmin && html`
+                    <div class="lg:col-span-2">
+                        <${ActivityLog} 
+                            settings=${settings} 
+                            isAdmin=${isAdmin}
+                            teacherSession=${teacherSession}
+                            limit=${25}
+                        />
+                    </div>
+                `}
             </div>
         </div>
     `;

@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useMemo, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
+import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
@@ -159,7 +160,7 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                     >
                         Print All Report Forms
                     </button>
-                    <button onClick=${() => window.print()} class="flex-1 md:flex-none bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm">Print Analysis</button>
+                    <${PrintButtons} />
                 </div>
             </div>
 
@@ -323,7 +324,7 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                 <h2 class="text-sm font-bold uppercase text-slate-600">Detailed Student Score Table — ${filterGrade} | ${filterTerm === 'FULL' ? 'Full Year' : filterTerm} (${filterYear})</h2>
             </div>
 
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+            <div class="analysis-container bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
                 <table class="w-full text-left border-collapse min-w-[1000px] analysis-table">
                     <thead class="bg-slate-50 border-b border-slate-200">
                         <tr>

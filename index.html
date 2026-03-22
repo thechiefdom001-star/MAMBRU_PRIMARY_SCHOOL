@@ -117,6 +117,38 @@
             .sticky {
                 position: static !important;
             }
+            /* Print Orientation using Named Pages */
+            @page portrait-page { 
+                size: A4 portrait; 
+                margin: 10mm;
+            }
+            @page landscape-page { 
+                size: A4 landscape; 
+                margin: 10mm;
+            }
+
+            body.portrait-mode {
+                page: portrait-page;
+            }
+            body.landscape-mode {
+                page: landscape-page;
+            }
+
+            @media print {
+                body {
+                    width: auto !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                body.portrait-mode {
+                    width: 210mm;
+                }
+                
+                body.landscape-mode {
+                    width: 297mm;
+                }
+            }
 
             table {
                 min-width: auto !important;
@@ -300,6 +332,19 @@
 
             body.print-table-only .print-section-receipt {
                 display: none !important;
+            }
+
+            /* Fix for wide tables in print */
+            .marklist-container, .analysis-container, .fees-container, .feesregister-container, 
+            .attendance-container, .seniorschool-container, .payroll-container, .library-container,
+            .timetable-container, .transport-container, .assessments-container {
+                width: 100% !important;
+                overflow: visible !important;
+            }
+
+            table {
+                table-layout: auto !important;
+                width: 100% !important;
             }
         }
 
