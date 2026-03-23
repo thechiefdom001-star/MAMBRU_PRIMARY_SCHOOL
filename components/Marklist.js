@@ -25,15 +25,17 @@ function getGradeStreamOptions(grades, streams) {
     });
 }
 
-export const Marklist = ({ data = {}, setData = () => { } }) => {
+export const Marklist = ({ data = {}, setData = () => { }, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
     const settings = data?.settings || {};
-    const grades = safeArray(settings.grades);
+    const allGrades = safeArray(settings.grades);
+    const grades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
+
     const streams = safeArray(settings.streams);
     const studentsList = safeArray(data?.students);
     const assessmentsList = safeArray(data?.assessments);
     const remarksList = safeArray(data?.remarks);
 
-    const gradeStreamOptions = getGradeStreamOptions(grades, streams);
+    const gradeStreamOptions = getGradeStreamOptions(grades.length > 0 ? grades : ['-- No Assigned Grades --'], streams);
     const defaultGradeStream = gradeStreamOptions.length > 0 ? gradeStreamOptions[0].value : 'GRADE 1';
     const [selectedGradeStream, setSelectedGradeStream] = useState(defaultGradeStream);
     const [selectedTerm, setSelectedTerm] = useState('T1');
@@ -50,8 +52,11 @@ export const Marklist = ({ data = {}, setData = () => { } }) => {
     }, [selectedGradeStream, streams]);
 
     const subjects = useMemo(() => {
-        return safeArray(Storage.getSubjectsForGrade(selectedGrade || 'GRADE 1'));
-    }, [selectedGrade]);
+        const allSubjects = safeArray(Storage.getSubjectsForGrade(selectedGrade || 'GRADE 1'));
+        if (isAdmin) return allSubjects;
+        const availableSubjects = allSubjects.filter(s => allowedSubjects.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase())));
+        return availableSubjects.length > 0 ? availableSubjects : ['-- No Assigned Subjects --'];
+    }, [selectedGrade, isAdmin, allowedSubjects]);
 
     const classStudents = useMemo(() => {
         return studentsList.filter(s => {

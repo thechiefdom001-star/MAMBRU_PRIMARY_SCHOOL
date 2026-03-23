@@ -49,6 +49,18 @@ const App = () => {
     // Derived authentication state
     const isAuthenticated = isAdmin || teacherSession;
     
+    // Enrich teacher session with details from teacher records if available
+    const activeTeacher = teacherSession ? (data.teachers || []).find(t => 
+        (teacherSession.name && t.name && t.name.toLowerCase() === teacherSession.name.toLowerCase()) || 
+        (teacherSession.username && t.name && t.name.toLowerCase() === teacherSession.username.toLowerCase())
+    ) : null;
+    
+    const teacherSubjectsStr = [teacherSession?.subjects, activeTeacher?.subjects].filter(Boolean).join(',');
+    const teacherGradesStr = [teacherSession?.grades, activeTeacher?.grades, teacherSession?.classTeacherGrade, activeTeacher?.classTeacherGrade].filter(Boolean).join(',');
+
+    const allowedTeacherSubjects = teacherSubjectsStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+    const allowedTeacherGrades = teacherGradesStr.split(',').map(g => g.trim().toLowerCase()).filter(g => g);
+
     // Derive selectedStudent from data.students to ensure it's always fresh
     const selectedStudent = selectedStudentId 
         ? (data.students || []).find(s => String(s.id) === String(selectedStudentId)) || null
@@ -431,7 +443,7 @@ const App = () => {
 
     const handleLogin = (e) => {
         e.preventDefault();
-        if (loginUsername === '04119112' && loginPassword === 'Mambrui02') {
+        if (loginUsername === 'admin' && loginPassword === 'admin002') {
             setIsAdmin(true);
             localStorage.setItem('et_is_admin', 'true');
             localStorage.setItem('et_login_username', loginUsername);
@@ -607,7 +619,7 @@ const App = () => {
                         <div class="space-y-12">
                             ${gradeStudents.map((s, idx) => html`
                                 <div class=${idx > 0 ? 'page-break pt-8' : ''}>
-                                    <${StudentDetail} student=${s} data=${data} setData=${setData} isBatch=${true} initialTerm=${batchTerm} />
+                                    <${StudentDetail} student=${s} data=${data} setData=${setData} isBatch=${true} initialTerm=${batchTerm} isAdmin=${isAdmin} teacherSession=${teacherSession} />
                                 </div>
                             `)}
                         </div>
@@ -625,14 +637,14 @@ const App = () => {
             case 'marklist': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="assessments" /></div>
-                    <${Marklist} data=${data} setData=${setData} />
+                    <${Marklist} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
                 </div>
             `;
             case 'assessments': return html`
-                <${Assessments} data=${data} setData=${setData} />
+                <${Assessments} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
             `;
             case 'attendance': return html`
-                <${Attendance} data=${data} setData=${setData} />
+                <${Attendance} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedGrades=${allowedTeacherGrades} />
             `;
             case 'senior-school': return html`
                 <div class="space-y-4">
@@ -640,11 +652,11 @@ const App = () => {
                     <${SeniorSchool} data=${data} setData=${setData} />
                 </div>
             `;
-            case 'timetable': return html`<${Timetable} data=${data} setData=${setData} />`;
+            case 'timetable': return html`<${Timetable} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
             case 'result-analysis': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="academic-full" /></div>
-                    <${ResultAnalysis} data=${data} onSelectStudent=${handleAcademicPrintSelect} />
+                    <${ResultAnalysis} data=${data} onSelectStudent=${handleAcademicPrintSelect} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
                 </div>
             `;
             case 'fees': return html`<${Fees} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
@@ -655,7 +667,7 @@ const App = () => {
             case 'payroll': return html`<${Payroll} data=${data} setData=${setData} />`;
             case 'archives': return html`<${Archives} data=${data} />`;
             case 'settings': return html`<${Settings} data=${data} setData=${setData} />`;
-            case 'student-detail': return html`<${StudentDetail} student=${selectedStudent} data=${data} setData=${setData} onBack=${() => setView('students')} />`;
+            case 'student-detail': return html`<${StudentDetail} student=${selectedStudent} data=${data} setData=${setData} onBack=${() => setView('students')} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
             default: return html`<${Dashboard} data=${data} googleSyncStatus=${googleSyncStatus} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
         }
     };
@@ -939,7 +951,7 @@ const App = () => {
     `;
 };
 
-const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initialTerm = 'T1' }) => {
+const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initialTerm = 'T1', isAdmin, teacherSession }) => {
     if (!student) return html`<div>Student not found</div>`;
 
     const [selectedTerm, setSelectedTerm] = useState(initialTerm);
@@ -950,16 +962,31 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
 
     const getAssessmentsForTerm = (term) => {
         const academicYear = data.settings.academicYear || settings.academicYear;
+        const studentIdStr = String(student.id);
         if (term === 'FULL') {
-            return data.assessments.filter(a => a.studentId === student.id && a.academicYear === academicYear);
+            return data.assessments.filter(a => String(a.studentId) === studentIdStr && a.academicYear === academicYear);
         }
-        return data.assessments.filter(a => a.studentId === student.id && a.term === term && a.academicYear === academicYear);
+        return data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === term && a.academicYear === academicYear);
     };
 
     const assessments = getAssessmentsForTerm(selectedTerm);
 
     // Calculate totals for summary cards based on subject averages
-    const subjects = Storage.getSubjectsForGrade(student.grade);
+    let subjects = Storage.getSubjectsForGrade(student.grade, student);
+    const isSenior = ['GRADE 10', 'GRADE 11', 'GRADE 12'].includes(student.grade);
+    
+    if (isSenior) {
+        const studentIdStr = String(student.id);
+        const academicYear = data.settings.academicYear || settings.academicYear;
+        const theirAssessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.academicYear === academicYear);
+        const takenSubjects = [...new Set(theirAssessments.map(a => a.subject))];
+        let filtered = subjects.filter(s => takenSubjects.includes(s));
+        if (filtered.length < 7) {
+            filtered = [...new Set([...filtered, ...subjects])].slice(0, 7);
+        }
+        subjects = filtered.slice(0, 10);
+    }
+
     const subjectAverages = subjects.map(subject => {
         const scores = examTypes.map(type => {
             const match = assessments.find(a => a.subject === subject && a.examType === type);
@@ -970,10 +997,14 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
         return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
     });
 
-    const totalMarks = subjectAverages.reduce((sum, avg) => sum + (avg || 0), 0);
+    const validAveragesForOverall = isSenior 
+        ? subjectAverages.filter(a => a !== null).sort((a, b) => b - a).slice(0, 7)
+        : subjectAverages.filter(a => a !== null);
+
+    const totalMarks = validAveragesForOverall.reduce((sum, avg) => sum + avg, 0);
     const subjectCount = subjects.length;
     // Overall level = calculated from average of subject percentages
-    const overallResult = Storage.getOverallLevel(subjectAverages.filter(a => a !== null));
+    const overallResult = Storage.getOverallLevel(validAveragesForOverall);
     const overallLevel = overallResult.level;
     const overallPercentage = overallResult.percentage;
     const overallAL = overallResult.al;
@@ -983,22 +1014,39 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
 
     const getYearSummary = () => {
         const academicYear = data.settings.academicYear || settings.academicYear;
+        const studentIdStr = String(student.id);
         const terms = ['T1', 'T2', 'T3'];
         return terms.map(term => {
-            const termAssessments = data.assessments.filter(a => a.studentId === student.id && a.term === term && a.academicYear === academicYear);
+            const termAssessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === term && a.academicYear === academicYear);
+            
+            const subjectPoints = {};
+            let termPoints = 0;
+            
             const termSubjects = subjects.map(subject => {
                 const scores = examTypes.map(type => {
                     const match = termAssessments.find(a => a.subject === subject && a.examType === type);
                     return match ? Number(match.score) : null;
                 }).filter(s => s !== null);
+                
                 return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
             });
-            const termOverall = Storage.getOverallLevel(termSubjects.filter(t => t !== null));
+
+            const validItems = termSubjects.map((avg, i) => ({ subject: subjects[i], avg })).filter(item => item.avg !== null);
+            const consideredItems = isSenior && validItems.length > 7 ? [...validItems].sort((a, b) => b.avg - a.avg).slice(0, 7) : validItems;
+
+            consideredItems.forEach(item => {
+                const gradeInfo = Storage.getGradeInfo(item.avg);
+                if (gradeInfo) {
+                    subjectPoints[item.subject] = gradeInfo.points;
+                    termPoints += gradeInfo.points;
+                }
+            });
+
+            const validAveragesForOverall = consideredItems.map(item => item.avg);
+            const termOverall = Storage.getOverallLevel(validAveragesForOverall);
             const termAttendance = Storage.getStudentAttendance(student.id, data.attendance || [], term);
-            const avgScore = termSubjects.filter(s => s !== null).length > 0
-                ? Math.round(termSubjects.reduce((a, b) => a + (b || 0), 0) / termSubjects.filter(s => s !== null).length)
-                : 0;
-            return { term, avgScore, termLevel: termOverall.level, termPercentage: termOverall.percentage, termAL: termOverall.al, termAttendance };
+            
+            return { term, avgScore: termOverall.percentage, termLevel: termOverall.level, termPercentage: termOverall.percentage, termAL: termOverall.al, termAttendance, subjectPoints, termPoints };
         });
     };
 
@@ -1034,6 +1082,17 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
     const remark = (data.remarks || []).find(r => r.studentId === student.id) || { teacher: '', principal: '' };
     const studentGradeWithStream = student.grade + (student.stream || '');
     const classTeacher = (data.teachers || []).find(t => t.isClassTeacher && t.classTeacherGrade === studentGradeWithStream);
+    
+    // Check if the current user is the class teacher for this student
+    const isThisClassTeacher = teacherSession && (
+        (teacherSession.role === 'class_teacher' && teacherSession.classTeacherGrade === studentGradeWithStream) ||
+        (teacherSession.role === 'head_teacher') ||
+        (teacherSession.role === 'admin') ||
+        (classTeacher && (
+            (teacherSession.name && classTeacher.name && teacherSession.name.toLowerCase() === classTeacher.name.toLowerCase()) || 
+            (teacherSession.username && classTeacher.username && teacherSession.username.toLowerCase() === classTeacher.username.toLowerCase())
+        ))
+    );
 
     const handleRemarkChange = (field, val) => {
         const otherRemarks = (data.remarks || []).filter(r => r.studentId !== student.id);
@@ -1090,7 +1149,7 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                             <option value="T3">Term 3</option>
                             <option value="FULL">Full Year</option>
                         </select>
-                        <${PrintButtons} />
+                        ${(isAdmin || isThisClassTeacher) && html`<${PrintButtons} />`}
                     </div>
                 </div>
 
@@ -1164,9 +1223,10 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                 <tbody class="divide-y print:divide-black">
                                     ${subjects.map(subject => {
                 const academicYear = data.settings.academicYear || settings.academicYear;
-                const t1Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T1' && a.subject === subject && a.academicYear === academicYear);
-                const t2Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T2' && a.subject === subject && a.academicYear === academicYear);
-                const t3Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T3' && a.subject === subject && a.academicYear === academicYear);
+                const studentIdStr = String(student.id);
+                const t1Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T1' && a.subject === subject && a.academicYear === academicYear);
+                const t2Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T2' && a.subject === subject && a.academicYear === academicYear);
+                const t3Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T3' && a.subject === subject && a.academicYear === academicYear);
 
                 const getScores = (termAssessments) => {
                     const scores = {};
@@ -1228,11 +1288,14 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                 <tfoot class="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-900">
                                     <tr class="print:border-black">
                                         <td class="p-2 print:p-1.5 uppercase text-[9px]">Term Totals</td>
-                                        ${['T1', 'T2', 'T3'].map(term => {
-                const termAssessments = data.assessments.filter(a => a.studentId === student.id && a.term === term);
+                                        ${(() => {
+                const academicYear = data.settings.academicYear || settings.academicYear;
+                const studentIdStr = String(student.id);
+                return ['T1', 'T2', 'T3'].map(term => {
+                const termAssessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === term && a.academicYear === academicYear);
                 const sum = termAssessments.reduce((a, b) => a + Number(b.score), 0);
                 return html`<td colspan="3" class="p-2 print:p-1.5 text-center border-l text-[10px] print:text-[9px]">${sum || '-'}</td>`;
-            })}
+            })})}
                                         <td class="p-2 print:p-1.5 text-center border-l bg-orange-50/50 text-orange-700 text-[10px] print:text-[10px]">
                                             ${(() => {
                 const allTermPoints = [];
@@ -1259,7 +1322,8 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                 });
                 if (allTermPoints.length === 0) return '-';
                 const avgPts = allTermPoints.reduce((a, b) => a + b, 0) / allTermPoints.length;
-                return Storage.getOverallLevel(avgPts * subjects.length, subjects.length);
+                const avgScore = Math.round(avgPts * 12.5);
+                return Storage.getGradeInfo(avgScore)?.level || '-';
             })()}
                                         </td>
                                         <td class="p-2 print:p-1.5 text-center border-l font-black text-orange-700 print:text-[10px]">
@@ -1342,36 +1406,40 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                     <tr class="print:border-black">
                                         <td class="p-2 print:p-1.5 uppercase text-[9px]">Learning Area Totals</td>
                                         ${['Opener', 'Mid-Term', 'End-Term'].map(type => {
-                const sum = assessments.filter(a => a.examType === type).reduce((a, b) => a + Number(b.score), 0);
+                const typeAssessments = assessments.filter(a => a.examType === type);
+                let validScores = subjects.map(s => {
+                    const m = typeAssessments.find(a => a.subject === s);
+                    return m ? Number(m.score) : null;
+                }).filter(s => s !== null);
+                if (isSenior && validScores.length > 7) validScores = validScores.sort((a,b) => b-a).slice(0,7);
+                const sum = validScores.reduce((a, b) => a + b, 0);
                 return html`<td class="p-2 print:p-1.5 text-center border-l text-[10px] print:text-[11px]">${sum || '-'}</td>`;
             })}
                                         <td class="p-2 print:p-1.5 text-center border-l bg-blue-50/50 text-blue-700 text-[10px] print:text-[11px]">
-                                            ${Math.round(Storage.getSubjectsForGrade(student.grade).reduce((sum, subject) => {
-                const subScores = assessments.filter(a => a.subject === subject).map(a => Number(a.score));
-                return sum + (subScores.length > 0 ? subScores.reduce((a, b) => a + b, 0) / subScores.length : 0);
-            }, 0)) || '-'}
+                                            ${totalMarks || '-'}
                                         </td>
-                                        <td class="p-2 print:p-1.5 text-center border-l font-black text-blue-700 print:text-[11px]">${overallAL}</td>
+                                        <td class="p-2 print:p-1.5 text-center border-l font-black text-blue-700 print:text-[11px]">${overallLevel}</td>
+                                        <td class="p-2 print:p-1.5 text-center border-l font-black text-slate-700 print:text-[11px]">
+                                            ${validAveragesForOverall.reduce((sum, avg) => sum + (Storage.getGradeInfo(avg)?.points || 0), 0) || '-'}
+                                        </td>
                                     </tr>
                                     <tr class="bg-white print:border-black">
                                         <td class="p-2 print:p-1.5 uppercase text-[9px] text-blue-600 font-black">Mean Score Average</td>
                                         ${['Opener', 'Mid-Term', 'End-Term'].map(type => {
                 const typeAssessments = assessments.filter(a => a.examType === type);
-                const count = Storage.getSubjectsForGrade(student.grade).length;
-                const avg = typeAssessments.length > 0 ? Math.round(typeAssessments.reduce((a, b) => a + Number(b.score), 0) / count) : 0;
+                let validScores = subjects.map(s => {
+                    const m = typeAssessments.find(a => a.subject === s);
+                    return m ? Number(m.score) : null;
+                }).filter(s => s !== null);
+                if (isSenior && validScores.length > 7) validScores = validScores.sort((a,b) => b-a).slice(0,7);
+                const avg = validScores.length > 0 ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length) : 0;
                 return html`<td class="p-2 print:p-1.5 text-center border-l text-blue-600 font-black text-[10px] print:text-[11px]">${avg ? avg + '%' : '-'}</td>`;
             })}
                                     <td class="p-2 print:p-1.5 text-center border-l bg-blue-600 text-white text-[10px] print:text-[11px] font-black">
-                                        ${(() => {
-                const subs = Storage.getSubjectsForGrade(student.grade);
-                const totalAvg = subs.reduce((sum, subject) => {
-                    const subScores = assessments.filter(a => a.subject === subject).map(a => Number(a.score));
-                    return sum + (subScores.length > 0 ? Math.round(subScores.reduce((a, b) => a + b, 0) / subScores.length) : 0);
-                }, 0);
-                return Math.round(totalAvg / subs.length) + '%';
-            })()}
+                                        ${overallPercentage}%
                                     </td>
-                                    <td class="border-l"></td>
+                                    <td class="border-l text-center font-black print:text-[11px]">${overallLevel}</td>
+                                    <td class="border-l text-center font-black print:text-[11px]">${Storage.getGradeInfo(overallPercentage)?.points || '-'}</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1386,10 +1454,13 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                         <div class="bg-white p-3 rounded-xl border border-slate-100 print:border-black">
                             <h3 class="font-black text-[10px] uppercase text-slate-500 mb-3">Subject Performance Comparison</h3>
                             <div class="flex flex-wrap gap-1 justify-center items-end h-32 print:h-24">
-                                ${subjects.map((subject, idx) => {
-                const t1Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T1' && a.subject === subject);
-                const t2Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T2' && a.subject === subject);
-                const t3Assessments = data.assessments.filter(a => a.studentId === student.id && a.term === 'T3' && a.subject === subject);
+                                ${(() => {
+                const academicYear = data.settings.academicYear || settings.academicYear;
+                const studentIdStr = String(student.id);
+                return subjects.map((subject, idx) => {
+                const t1Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T1' && a.subject === subject && a.academicYear === academicYear);
+                const t2Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T2' && a.subject === subject && a.academicYear === academicYear);
+                const t3Assessments = data.assessments.filter(a => String(a.studentId) === studentIdStr && a.term === 'T3' && a.subject === subject && a.academicYear === academicYear);
                 const getAvg = (assessments) => {
                     const scores = assessments.map(a => Number(a.score));
                     return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
@@ -1408,7 +1479,8 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                             <span class="text-[7px] text-slate-500 truncate max-w-[40px] print:max-w-[30px]">${subject.substring(0, 8)}</span>
                                         </div>
                                     `;
-            })}
+                });
+            })()}
                             </div>
                             <div class="flex justify-center gap-4 mt-2 text-[8px]">
                                 <span class="flex items-center gap-1"><span class="w-2 h-2 bg-green-400 rounded"></span> Term 1</span>
@@ -1551,29 +1623,6 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                             </td>
                                             <td class="border p-2 text-center">-</td>
                                         </tr>
-                return (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1);
-            })()}
-                                            </td>
-                                            <td class="border p-2 text-center">
-                                                ${(() => {
-                const allScores = [];
-                yearSummary.forEach(ys => {
-                    subjects.forEach(subject => {
-                        const pts = ys.subjectPoints?.[subject] || 0;
-                        if (pts > 0) allScores.push(pts);
-                    });
-                });
-                if (allScores.length === 0) return '-';
-                const avgPts = allScores.reduce((a, b) => a + b, 0) / allScores.length;
-                return Storage.getOverallLevel(avgPts * subjects.length, subjects.length);
-            })()}
-                                            </td>
-                                            <td class="border p-2 text-center">
-                                                ${yearSummary.filter(y => y.termAttendance !== null).length > 0
-                ? Math.round(yearSummary.reduce((a, b) => a + (b.termAttendance || 0), 0) / yearSummary.filter(y => y.termAttendance !== null).length) + '%'
-                : '-'}
-                                            </td>
-                                        </tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -1598,10 +1647,13 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${subjects.map(subject => {
+                                        ${(() => {
+                const academicYear = data.settings.academicYear || settings.academicYear;
+                const studentIdStr = String(student.id);
+                return subjects.map(subject => {
                     const termScores = ['T1', 'T2', 'T3'].map(term => {
                         const termAssessments = data.assessments.filter(a =>
-                            a.studentId === student.id && a.term === term && a.subject === subject
+                            String(a.studentId) === studentIdStr && a.term === term && a.subject === subject && a.academicYear === academicYear
                         );
                         const scores = examTypes.map(type => {
                             const match = termAssessments.find(a => a.examType === type);
@@ -1629,10 +1681,11 @@ const StudentDetail = ({ student, data, setData, onBack, isBatch = false, initia
                                                             </span>
                                                         ` : '-'}
                                                     </td>
-                                                </tr>
-                                            `;
-                })}
-                                    </tbody>
+                                            </tr>
+                                        `;
+                });
+            })()}
+                                </tbody>
                                 </table>
                             </div>
 

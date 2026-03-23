@@ -6,10 +6,16 @@ import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const Timetable = ({ data, setData }) => {
-    const [viewType, setViewType] = useState('class'); // 'class', 'teacher', 'master'
+export const Timetable = ({ data, setData, isAdmin, teacherSession }) => {
+    const teachers = data.teachers || [];
+    const activeTeacher = teacherSession ? teachers.find(t => 
+        (teacherSession.name && t.name && teacherSession.name.toLowerCase() === t.name.toLowerCase()) || 
+        (teacherSession.username && t.username && teacherSession.username.toLowerCase() === t.username.toLowerCase())
+    ) : null;
+
+    const [viewType, setViewType] = useState(isAdmin ? 'class' : 'teacher'); // 'class', 'teacher', 'master'
     const [selectedGroup, setSelectedGroup] = useState('primary');
-    const [selectedFilter, setSelectedFilter] = useState('');
+    const [selectedFilter, setSelectedFilter] = useState(isAdmin ? '' : (activeTeacher?.id || ''));
     const [showAddEntry, setShowAddEntry] = useState(false);
     const [newEntry, setNewEntry] = useState({
         day: 'Monday',
@@ -43,7 +49,6 @@ export const Timetable = ({ data, setData }) => {
     const [showSlotManager, setShowSlotManager] = useState(false);
     
     const timetables = data.timetables || [];
-    const teachers = data.teachers || [];
     const grades = data.settings.grades || [];
 
     const handleAddEntry = (e) => {
@@ -129,16 +134,16 @@ export const Timetable = ({ data, setData }) => {
                     <p class="text-slate-500 text-sm">Schedule management for classes and teachers</p>
                 </div>
                 <div class="flex flex-wrap gap-2 w-full md:w-auto">
-                    <button onClick=${() => setShowSlotManager(!showSlotManager)} class=${`flex-1 md:flex-none px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${showSlotManager ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                    ${isAdmin && html`<button onClick=${() => setShowSlotManager(!showSlotManager)} class=${`flex-1 md:flex-none px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${showSlotManager ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                         Manage Slots/Breaks
-                    </button>
+                    </button>`}
                     <${PrintButtons} />
-                    <button 
+                    ${isAdmin && html`<button 
                         onClick=${() => setShowAddEntry(!showAddEntry)}
                         class="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm"
                     >
                         ${showAddEntry ? 'Cancel' : 'Add Lesson'}
-                    </button>
+                    </button>`}
                 </div>
             </div>
 
@@ -190,7 +195,7 @@ export const Timetable = ({ data, setData }) => {
             `}
 
             <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-wrap gap-4 no-print items-end">
-                <div class="space-y-1">
+                ${isAdmin && html`<div class="space-y-1">
                     <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">View Mode</label>
                     <select 
                         class="p-2.5 bg-slate-50 rounded-xl border-0 text-sm font-bold outline-none min-w-[150px]"
@@ -201,14 +206,14 @@ export const Timetable = ({ data, setData }) => {
                         <option value="teacher">Teacher Timetable</option>
                         <option value="master">Master View</option>
                     </select>
-                </div>
+                </div>`}
 
                 ${viewType !== 'master' ? html`
                     <div class="space-y-1">
                         <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">
                             ${viewType === 'class' ? 'Select Grade' : 'Select Teacher'}
                         </label>
-                        <select 
+                        ${isAdmin ? html`<select 
                             class="p-2.5 bg-slate-50 rounded-xl border-0 text-sm font-bold outline-none min-w-[200px]"
                             value=${selectedFilter}
                             onChange=${e => setSelectedFilter(e.target.value)}
@@ -218,7 +223,7 @@ export const Timetable = ({ data, setData }) => {
                                 ? grades.map(g => html`<option value=${g}>${g}</option>`)
                                 : teachers.map(t => html`<option value=${t.id}>${t.name}</option>`)
                             }
-                        </select>
+                        </select>` : html`<div class="p-2.5 bg-slate-50 rounded-xl border-0 text-sm font-bold min-w-[200px] text-slate-700">${activeTeacher?.name || 'Unknown Teacher'}</div>`}
                     </div>
                 ` : html`
                     <div class="space-y-1">

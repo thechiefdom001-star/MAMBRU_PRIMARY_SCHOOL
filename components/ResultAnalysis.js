@@ -6,9 +6,13 @@ import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const ResultAnalysis = ({ data, onSelectStudent }) => {
+export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
+    const allGrades = data?.settings?.grades || [];
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
+
     const [filterTerm, setFilterTerm] = useState('T1');
-    const [filterGrade, setFilterGrade] = useState('GRADE 1');
+    const [filterGrade, setFilterGrade] = useState(gradesToUse[0] || 'GRADE 1');
     const [filterStream, setFilterStream] = useState('ALL');
     const [filterSubject, setFilterSubject] = useState('ALL');
     const [filterYear, setFilterYear] = useState(data.settings.academicYear || '2025/2026');
@@ -30,7 +34,9 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
         return s.stream === filterStream;
     });
     const assessments = data.assessments || [];
-    const subjects = Storage.getSubjectsForGrade(filterGrade);
+    const allSubjects = Storage.getSubjectsForGrade(filterGrade);
+    const availableSubjects = isAdmin ? allSubjects : allSubjects.filter(s => allowedSubjects.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase())));
+    const subjects = availableSubjects.length > 0 ? availableSubjects : ['-- No Assigned Subjects --'];
     const examTypes = ['Opener', 'Mid-Term', 'End-Term'];
 
     const analysisData = useMemo(() => {
@@ -145,6 +151,19 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
         }).slice(0, 10);
     }, [analysisData, filterSubject]);
 
+    const activeGradeWithStream = filterGrade + (filterStream !== 'ALL' ? filterStream : '');
+    const isThisClassTeacher = teacherSession && (
+        (teacherSession.role === 'class_teacher' && teacherSession.classTeacherGrade === activeGradeWithStream) ||
+        (teacherSession.role === 'head_teacher') ||
+        (teacherSession.role === 'admin') ||
+        (data.teachers && data.teachers.some(t => 
+            t.isClassTeacher && t.classTeacherGrade === activeGradeWithStream && (
+                (t.name && teacherSession.name && t.name.toLowerCase() === teacherSession.name.toLowerCase()) || 
+                (t.username && teacherSession.username && t.username.toLowerCase() === teacherSession.username.toLowerCase())
+            )
+        ))
+    );
+
     return html`
         <div class="space-y-6">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 no-print">
@@ -153,13 +172,13 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                     <p class="text-slate-500 text-sm">Aggregated performance across triple-exam cycles</p>
                 </div>
                 <div class="flex gap-2 w-full md:w-auto">
-                    <button 
+                    ${(isAdmin || isThisClassTeacher) && html`<button 
                         onClick=${() => onSelectStudent(analysisData[0]?.id, true)} 
                         class="flex-1 md:flex-none bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
                         disabled=${analysisData.length === 0}
                     >
                         Print All Report Forms
-                    </button>
+                    </button>`}
                     <${PrintButtons} />
                 </div>
             </div>
@@ -202,7 +221,7 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                         value=${filterGrade}
                         onChange=${e => { setFilterGrade(e.target.value); setFilterSubject('ALL'); }}
                     >
-                        ${data.settings.grades.map(g => html`<option value=${g}>${g}</option>`)}
+                        ${gradesToUse.map(g => html`<option value=${g}>${g}</option>`)}
                     </select>
                 </div>
                 <div class="space-y-1">
@@ -346,7 +365,20 @@ export const ResultAnalysis = ({ data, onSelectStudent }) => {
                                 </th>
                             `)}
                             <th class="px-4 py-4 text-[10px] font-black text-slate-900 uppercase text-right bg-slate-100">Overall Avg</th>
-                            <th class="px-4 py-4 text-[10px] font-black text-slate-900 uppercase text-center bg-slate-100 no-print">Action</th>
+                            <th class="px-4 py-4 text-[10px] font-black text-slate-900 uppercase text-center bg-slate-100 no-print">
+                                <div class="flex flex-col items-center gap-1">
+                                    ${(isAdmin || isThisClassTeacher) && html`
+                                        <button 
+                                            onClick=${() => onSelectStudent(analysisData[0]?.id, true)} 
+                                            class="bg-blue-600 text-white px-3 py-1 rounded text-[8px] font-black uppercase hover:bg-blue-700 transition-all shadow-sm"
+                                            title="Print cards for everyone in this class"
+                                        >
+                                            Print All
+                                        </button>
+                                    `}
+                                    <span>Action</span>
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">

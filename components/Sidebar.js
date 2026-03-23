@@ -15,8 +15,11 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
     };
 
     // Define which items require admin vs teacher access
-    const adminOnlyItems = new Set(['settings', 'fees', 'fees-register', 'fee-reminder', 'payroll', 'teachers', 'staff']);
-    const teacherAccessItems = new Set(['students', 'senior-school', 'assessments', 'attendance', 'marklist', 'timetable', 'result-analysis', 'transport', 'library', 'archives']);
+    const adminOnlyItems = new Set(['settings', 'fees', 'fees-register', 'fee-reminder', 'payroll', 'teachers', 'staff', 'senior-school', 'library', 'archives']);
+    if (!isAdmin && teacherSession?.role !== 'class_teacher' && teacherSession?.role !== 'head_teacher' && teacherSession?.role !== 'admin') {
+        adminOnlyItems.add('students');
+    }
+    const teacherAccessItems = new Set(['assessments', 'attendance', 'marklist', 'timetable', 'result-analysis', 'transport']);
 
     const isAuthenticated = isAdmin || teacherSession;
 

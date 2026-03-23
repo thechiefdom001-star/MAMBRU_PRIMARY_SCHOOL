@@ -7,8 +7,12 @@ import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
-    const [selectedGrade, setSelectedGrade] = useState('GRADE 1');
+export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
+    const allGrades = data?.settings?.grades || [];
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
+
+    const [selectedGrade, setSelectedGrade] = useState(gradesToUse[0] || 'GRADE 1');
     const [selectedStream, setSelectedStream] = useState('ALL');
     const [selectedSubject, setSelectedSubject] = useState('');
     const [selectedTerm, setSelectedTerm] = useState('T1');
@@ -17,9 +21,12 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
     const [syncStatus, setSyncStatus] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [historySearchTerm, setHistorySearchTerm] = useState('');
+    const [examTotal, setExamTotal] = useState(100);
 
     const streams = data?.settings?.streams || [];
-    const subjects = Storage.getSubjectsForGrade(selectedGrade);
+    const allSubjects = Storage.getSubjectsForGrade(selectedGrade);
+    const availableSubjects = isAdmin ? allSubjects : allSubjects.filter(s => allowedSubjects.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase())));
+    const subjects = availableSubjects.length > 0 ? availableSubjects : ['-- No Assigned Subjects --'];
 
     // Track activity helper
     const trackActivity = async (action, assessment, oldData = null) => {
@@ -135,11 +142,20 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
         
         let level = existing?.level || 'ME2';
         let score = existing?.score || 0;
+        let rawScore = existing?.rawScore || score;
+        let maxScore = existing?.maxScore || 100;
 
         if (field === 'score') {
             score = Number(value);
+            rawScore = score;
+            maxScore = 100;
             level = Storage.getGradeInfo(score).level;
-        } else {
+        } else if (field === 'rawScore') {
+            rawScore = Number(value);
+            maxScore = Number(examTotal) || 100;
+            score = Math.round((rawScore / maxScore) * 100);
+            level = Storage.getGradeInfo(score).level;
+        } else if (field === 'level') {
             level = value;
         }
 
@@ -152,6 +168,8 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
             examType: selectedExamType,
             level,
             score,
+            rawScore,
+            maxScore,
             academicYear: academicYear,
             date: new Date().toISOString().split('T')[0]
         };
@@ -495,7 +513,7 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
                         value=${selectedGrade}
                         onChange=${(e) => { setSelectedGrade(e.target.value); setSelectedStream('ALL'); }}
                     >
-                        ${data.settings.grades.map(g => html`<option value=${g}>${g}</option>`)}
+                        ${gradesToUse.map(g => html`<option value=${g}>${g}</option>`)}
                     </select>
                 </div>
                 <div class="flex flex-col gap-1">
@@ -544,6 +562,16 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
                     </select>
                 </div>
                 <div class="flex flex-col gap-1">
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Total Marks/Questions</label>
+                    <input 
+                        type="number"
+                        class="p-3 bg-blue-50 border-2 border-blue-200 rounded-xl outline-none w-24 font-bold text-blue-700"
+                        value=${examTotal}
+                        onInput=${(e) => setExamTotal(e.target.value)}
+                        placeholder="E.g. 100"
+                    />
+                </div>
+                <div class="flex flex-col gap-1">
                     <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Quick Search</label>
                     <div class="relative">
                         <input 
@@ -580,15 +608,22 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
                                     </div>
                                     <div class="flex flex-col md:flex-row items-center gap-4">
                                         <div class="flex items-center gap-2">
-                                            <label class="text-[10px] font-bold text-slate-400 uppercase">Score</label>
-                                            <input 
-                                                type="number" 
-                                                min="0" max="100"
-                                                value=${assessment?.score || ''}
-                                                onBlur=${(e) => updateAssessment(student.id, 'score', e.target.value)}
-                                                class="w-16 p-2 bg-slate-50 border border-slate-100 rounded text-center font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                                                placeholder="0-100"
-                                            />
+                                            <label class="text-[10px] font-bold text-slate-400 uppercase">Score / ${examTotal}</label>
+                                            <div class="relative flex items-center">
+                                                <input 
+                                                    type="number" 
+                                                    min="0"
+                                                    value=${assessment?.rawScore !== undefined ? assessment.rawScore : (assessment?.score || '')}
+                                                    onBlur=${(e) => updateAssessment(student.id, 'rawScore', e.target.value)}
+                                                    class="w-16 p-2 bg-slate-50 border border-slate-100 rounded text-center font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                                                    placeholder="Raw"
+                                                />
+                                                ${assessment?.score !== undefined && examTotal != 100 && html`
+                                                    <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10">
+                                                        ${assessment.score}%
+                                                    </div>
+                                                `}
+                                            </div>
                                             ${assessment && html`
                                                 <button 
                                                     onClick=${() => deleteAssessment(assessment.id)}
@@ -687,29 +722,37 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession }) => {
                                                 <td class="px-4 py-3">${assessment.term}</td>
                                                 <td class="px-4 py-3">${assessment.examType}</td>
                                                 <td class="px-4 py-3 text-center font-bold">
-                                                    <input 
-                                                        type="number" 
-                                                        min="0" 
-                                                        max="100"
-                                                        value=${assessment.score}
-                                                        onChange=${(e) => {
-                                                            // 1. SAVE LOCALLY FIRST
-                                                            const updated = {
-                                                                ...assessment,
-                                                                score: Number(e.target.value),
-                                                                level: Storage.getGradeInfo(Number(e.target.value)).level
-                                                            };
-                                                            const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
-                                                            setData({ ...data, assessments: updatedAssessments });
-                                                            console.log('Score updated locally:', assessment.id);
-                                                            
-                                                            // 2. SYNC TO GOOGLE (silent)
-                                                            if (data.settings?.googleScriptUrl) {
-                                                                syncToGoogleSilent(updated).catch(() => {});
-                                                            }
-                                                        }}
-                                                        class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
-                                                    />
+                                                    <div class="flex flex-col items-center">
+                                                        <input 
+                                                            type="number" 
+                                                            min="0" 
+                                                            value=${assessment.rawScore !== undefined ? assessment.rawScore : assessment.score}
+                                                            onChange=${(e) => {
+                                                                const raw = Number(e.target.value);
+                                                                const max = assessment.maxScore || 100;
+                                                                const pct = Math.round((raw / max) * 100);
+                                                                
+                                                                // 1. SAVE LOCALLY FIRST
+                                                                const updated = {
+                                                                    ...assessment,
+                                                                    rawScore: raw,
+                                                                    score: pct,
+                                                                    level: Storage.getGradeInfo(pct).level
+                                                                };
+                                                                const updatedAssessments = data.assessments.map(a => a.id === assessment.id ? updated : a);
+                                                                setData({ ...data, assessments: updatedAssessments });
+                                                                
+                                                                // 2. SYNC TO GOOGLE (silent)
+                                                                if (data.settings?.googleScriptUrl) {
+                                                                    syncToGoogleSilent(updated).catch(() => {});
+                                                                }
+                                                            }}
+                                                            class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                                                        />
+                                                        ${assessment.maxScore && assessment.maxScore != 100 && html`
+                                                            <span class="text-[9px] text-slate-400">/ ${assessment.maxScore} (${assessment.score}%)</span>
+                                                        `}
+                                                    </div>
                                                 </td>
                                                 <td class="px-4 py-3 text-center">
                                                     <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">${assessment.level}</span>

@@ -12,6 +12,9 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [name, setName] = useState('');
     const [role, setRole] = useState('teacher');
+    const [subjects, setSubjects] = useState('');
+    const [grades, setGrades] = useState('');
+    const [classTeacherGrade, setClassTeacherGrade] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
@@ -51,6 +54,9 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                     name: result.name || result.username,
                     teacherId: result.teacherId,
                     role: result.role || 'teacher',
+                    subjects: result.subjects || '',
+                    grades: result.grades || '',
+                    classTeacherGrade: result.classTeacherGrade || '',
                     isTeacher: true
                 };
 
@@ -103,7 +109,10 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                 password,
                 '',
                 name || username,
-                role
+                role,
+                subjects,
+                grades,
+                classTeacherGrade
             );
 
             if (result.success) {
@@ -130,11 +139,14 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
         setPassword('');
         setConfirmPassword('');
         setName('');
+        setSubjects('');
+        setGrades('');
+        setClassTeacherGrade('');
     };
 
     return html`
         <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-y-auto max-h-[90vh]">
                 <!-- Header -->
                 <div class="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white text-center">
                     <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -250,6 +262,43 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                                     <option value="admin">Administrator</option>
                                 </select>
                             </div>
+
+                            ${(role === 'teacher' || role === 'class_teacher') && html`
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-600 mb-1">Subjects Taught</label>
+                                    <input
+                                        type="text"
+                                        value=${subjects}
+                                        onInput=${e => setSubjects(e.target.value)}
+                                        placeholder="E.g., Math, English (comma separated)"
+                                        class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-600 mb-1">Grades/Classes Taught</label>
+                                    <input
+                                        type="text"
+                                        value=${grades}
+                                        onInput=${e => setGrades(e.target.value)}
+                                        placeholder="E.g., GRADE 1, GRADE 2 (comma separated)"
+                                        class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            `}
+
+                            ${role === 'class_teacher' && html`
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-600 mb-1">Assigned Class (As Class Teacher)</label>
+                                    <input
+                                        type="text"
+                                        value=${classTeacherGrade}
+                                        onInput=${e => setClassTeacherGrade(e.target.value.toUpperCase())}
+                                        placeholder="E.g., GRADE 1 (must match exact grade name)"
+                                        class="w-full px-4 py-2.5 border-2 border-blue-200 bg-blue-50/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            `}
 
                             <div>
                                 <label class="block text-sm font-bold text-slate-600 mb-1">Password</label>

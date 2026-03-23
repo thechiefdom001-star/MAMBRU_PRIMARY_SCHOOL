@@ -842,7 +842,7 @@ export const Settings = ({ data, setData }) => {
                 <!-- Selective Import Modal -->
                 ${showImportModal && html`
                     <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                        <div class="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div class="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 overflow-y-auto max-h-[90vh]">
                             <h3 class="text-2xl font-black mb-2">Selective Import</h3>
                             <p class="text-slate-400 text-sm mb-6">Choose which data categories to override from the backup file.</p>
                             
@@ -857,7 +857,7 @@ export const Settings = ({ data, setData }) => {
                                 </label>
                             </div>
                             
-                            <div class="grid grid-cols-1 gap-3 mb-8">
+                            <div class="grid grid-cols-1 gap-3 mb-8 max-h-[40vh] overflow-y-auto p-1 pr-2 no-scrollbar">
                                 ${[
                                     { id: 'students', label: 'Students Directory', icon: '👥' },
                                     { id: 'marks', label: 'Marks & Assessments', icon: '📝' },

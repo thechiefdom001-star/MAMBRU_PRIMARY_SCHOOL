@@ -15,8 +15,12 @@ const getMonday = (date) => {
     return d.toISOString().split('T')[0];
 };
 
-export const Attendance = ({ data, setData }) => {
-    const [selectedGrade, setSelectedGrade] = useState('GRADE 1');
+export const Attendance = ({ data, setData, isAdmin, teacherSession, allowedGrades = [] }) => {
+    const allGrades = data?.settings?.grades || [];
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
+
+    const [selectedGrade, setSelectedGrade] = useState(gradesToUse[0] || 'GRADE 1');
     const [selectedStream, setSelectedStream] = useState('ALL');
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [selectedWeek, setSelectedWeek] = useState(1);
@@ -154,7 +158,7 @@ export const Attendance = ({ data, setData }) => {
                             onChange=${(e) => setSelectedGrade(e.target.value)}
                             class="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
                         >
-                            ${data.settings.grades.map(grade => html`<option value=${grade}>${grade}</option>`)}
+                            ${gradesToUse.map(grade => html`<option value=${grade}>${grade}</option>`)}
                         </select>
                     </div>
                     <div>

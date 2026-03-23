@@ -27,12 +27,12 @@ const SHEET_NAMES = {
 
 // Column headers for each sheet
 const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'admissionDate', 'upiNo', 'assessmentNo', 'parentContact', 'category', 'previousArrears', 'selectedFees'];
-const ASSESSMENT_HEADERS = ['id', 'studentId', 'studentAdmissionNo', 'studentName', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level'];
+const ASSESSMENT_HEADERS = ['id', 'studentId', 'studentAdmissionNo', 'studentName', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level', 'rawScore', 'maxScore'];
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
-const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
+const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo', 'isClassTeacher', 'classTeacherGrade'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt'];
-const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin'];
+const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin', 'subjects', 'grades', 'classTeacherGrade'];
 const ACTIVITY_LOG_HEADERS = ['id', 'userId', 'userName', 'userRole', 'action', 'module', 'recordId', 'recordName', 'details', 'oldValue', 'newValue', 'timestamp', 'ipAddress'];
 
 /**
@@ -47,7 +47,7 @@ function sanitizeRecord(record) {
   const stringFields = ['id', 'name', 'grade', 'stream', 'admissionNo', 'admissionDate', 'upiNo', 'assessmentNo', 'parentContact', 'selectedFees', 
                         'subject', 'term', 'examType', 'academicYear', 'date', 'level', 'status',
                         'receiptNo', 'method', 'reference', 'role', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo',
-                        'voided', 'voidedBy', 'studentId', 'studentAdmissionNo', 'studentName', 'category', 'previousArrears'];
+                        'voided', 'voidedBy', 'studentId', 'studentAdmissionNo', 'studentName', 'category', 'previousArrears', 'rawScore', 'maxScore'];
   
   // Allowed numeric fields
   const numericFields = ['score', 'amount'];
@@ -489,7 +489,10 @@ function doGet(e) {
           password: regData.password || e.parameter.password,
           teacherId: regData.teacherId || e.parameter.teacherId,
           name: regData.name || e.parameter.name,
-          role: regData.role || e.parameter.role
+          role: regData.role || e.parameter.role,
+          subjects: regData.subjects || e.parameter.subjects,
+          grades: regData.grades || e.parameter.grades,
+          classTeacherGrade: regData.classTeacherGrade || e.parameter.classTeacherGrade
         });
         break;
         
@@ -808,7 +811,10 @@ function doPost(e) {
           password: data.password,
           teacherId: data.teacherId,
           name: data.name,
-          role: data.role
+          role: data.role,
+          subjects: data.subjects,
+          grades: data.grades,
+          classTeacherGrade: data.classTeacherGrade
         });
         break;
         
@@ -1566,7 +1572,7 @@ function simpleHash(str) {
  * action=registerTeacher
  */
 function registerTeacher(credentials) {
-  const { username, password, teacherId, name, role } = credentials;
+  const { username, password, teacherId, name, role, subjects, grades, classTeacherGrade } = credentials;
   
   if (!username || !password) {
     return { success: false, error: 'Username and password are required' };
@@ -1599,7 +1605,10 @@ function registerTeacher(credentials) {
     name || username,
     role || 'teacher',
     now,
-    ''  // lastLogin - empty initially
+    '',  // lastLogin - empty initially
+    subjects || '',
+    grades || '',
+    classTeacherGrade || ''
   ]);
   
   return { 
@@ -1637,6 +1646,9 @@ function loginTeacher(credentials) {
     const storedTeacherId = String(data[i][2] || '');
     const storedName = String(data[i][3] || '');
     const storedRole = String(data[i][4] || 'teacher');
+    const storedSubjects = String(data[i][7] || '');
+    const storedGrades = String(data[i][8] || '');
+    const storedClassTeacherGrade = String(data[i][9] || '');
     
     if (storedUsername === username.toLowerCase().trim() && storedHash === passwordHash) {
       // Update last login
@@ -1648,7 +1660,10 @@ function loginTeacher(credentials) {
         username: storedUsername,
         teacherId: storedTeacherId,
         name: storedName,
-        role: storedRole
+        role: storedRole,
+        subjects: storedSubjects,
+        grades: storedGrades,
+        classTeacherGrade: storedClassTeacherGrade
       };
     }
   }
@@ -1676,7 +1691,9 @@ function getTeacherCredentials() {
       name: data[i][3],
       role: data[i][4],
       createdAt: data[i][5],
-      lastLogin: data[i][6]
+      lastLogin: data[i][6],
+      subjects: data[i][7] || '',
+      grades: data[i][8] || ''
     });
   }
   
