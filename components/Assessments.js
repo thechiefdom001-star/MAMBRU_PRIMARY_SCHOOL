@@ -175,23 +175,31 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         const student = (data.students || []).find(s => String(s.id) === studentIdStr || s.admissionNo === studentIdStr);
         const studentGrade = student?.grade || selectedGrade;
         
-        let level = existing?.level || 'ME2';
-        let score = existing?.score || 0;
-        let rawScore = existing?.rawScore || score;
-        let maxScore = existing?.maxScore || 100;
+        // Calculate based on current examTotal
+        const currentMaxScore = Number(examTotal) || 100;
+        let maxScore = currentMaxScore;
+        
+        let level = 'ME2';
+        let score = 0;
+        let rawScore = 0;
 
         if (field === 'score') {
-            score = Number(value);
-            rawScore = score;
-            maxScore = 100;
+            // User enters percentage directly (0-100)
+            score = Math.min(100, Math.max(0, Number(value)));
+            rawScore = Math.round((score / 100) * currentMaxScore);
             level = Storage.getGradeInfo(score).level;
         } else if (field === 'rawScore') {
-            rawScore = Number(value);
-            maxScore = Number(examTotal) || 100;
-            score = Math.round((rawScore / maxScore) * 100);
+            // User enters raw marks - convert to percentage
+            rawScore = Math.min(currentMaxScore, Math.max(0, Number(value)));
+            score = Math.round((rawScore / currentMaxScore) * 100);
             level = Storage.getGradeInfo(score).level;
         } else if (field === 'level') {
             level = value;
+            // Also calculate score from existing rawScore if available
+            if (existing?.rawScore !== undefined) {
+                rawScore = existing.rawScore;
+                score = Math.round((rawScore / currentMaxScore) * 100);
+            }
         }
 
         const newAssessment = {
@@ -645,12 +653,13 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                                                 <input 
                                                     type="number" 
                                                     min="0"
-                                                    value=${assessment?.rawScore !== undefined ? assessment.rawScore : (assessment?.score || '')}
+                                                    max=${examTotal}
+                                                    value=${assessment?.rawScore !== undefined ? assessment.rawScore : (assessment?.score !== undefined ? Math.round((assessment.score / 100) * examTotal) : '')}
                                                     onBlur=${(e) => updateAssessment(student.id, 'rawScore', e.target.value)}
                                                     class="w-16 p-2 bg-slate-50 border border-slate-100 rounded text-center font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                                                    placeholder="Raw"
+                                                    placeholder={"0/" + examTotal}
                                                 />
-                                                ${assessment?.score !== undefined && examTotal != 100 && html`
+                                                ${assessment?.score !== undefined && html`
                                                     <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10">
                                                         ${assessment.score}%
                                                     </div>

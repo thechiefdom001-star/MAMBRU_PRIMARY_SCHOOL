@@ -82,7 +82,11 @@ export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession,
                     const matches = studentAssessments.filter(a => a.subject === subject && a.examType === type);
                     const avgScore = matches.length > 0
                         ? Math.round(matches.reduce((sum, m) => {
-                            const score = Number(m.score);
+                            // Use score if available, otherwise calculate from rawScore
+                            let score = Number(m.score);
+                            if (isNaN(score) && m.rawScore !== undefined && m.maxScore) {
+                                score = Math.round((Number(m.rawScore) / Number(m.maxScore)) * 100);
+                            }
                             return sum + (isNaN(score) ? 0 : score);
                         }, 0) / matches.length)
                         : null;

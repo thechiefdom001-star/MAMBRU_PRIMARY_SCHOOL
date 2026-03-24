@@ -206,7 +206,15 @@ export const Marklist = ({ data = {}, setData = () => { }, isAdmin, teacherSessi
                 a.examType === selectedExamType &&
                 a.academicYear === academicYear
             );
-            const score = assessment ? Number(assessment.score) : null;
+            // Calculate score from rawScore and maxScore if available
+            let score = null;
+            if (assessment) {
+                if (assessment.score !== undefined) {
+                    score = Number(assessment.score);
+                } else if (assessment.rawScore !== undefined && assessment.maxScore) {
+                    score = Math.round((Number(assessment.rawScore) / Number(assessment.maxScore)) * 100);
+                }
+            }
             const gradeInfo = score !== null ? Storage.getGradeInfo(score) : null;
 
             return html`
