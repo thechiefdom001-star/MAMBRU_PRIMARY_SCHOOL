@@ -9,10 +9,11 @@ const html = htm.bind(h);
 export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
     const allGrades = data?.settings?.grades || [];
     
-    // Teachers: ONLY show exact grades they're assigned to
-    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => 
-        allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
-    );
+    // Teachers: ONLY show grades they're assigned to (case-insensitive)
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => {
+        const allowedLower = allowedGrades.map(ag => ag.toLowerCase());
+        return allowedLower.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase()));
+    });
     
     // Show no access if no grades assigned
     if (!isAdmin && availableGrades.length === 0) {

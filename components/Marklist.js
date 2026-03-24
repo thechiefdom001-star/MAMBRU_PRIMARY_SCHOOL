@@ -29,10 +29,11 @@ export const Marklist = ({ data = {}, setData = () => { }, isAdmin, teacherSessi
     const settings = data?.settings || {};
     const allGrades = safeArray(settings.grades);
     
-    // Teachers: ONLY show exact grades they're assigned to
-    const grades = isAdmin ? allGrades : allGrades.filter(g => 
-        allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
-    );
+    // Teachers: ONLY show grades they're assigned to (case-insensitive)
+    const grades = isAdmin ? allGrades : allGrades.filter(g => {
+        const allowedLower = allowedGrades.map(ag => ag.toLowerCase());
+        return allowedLower.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase()));
+    });
 
     // Show no access message if teacher has no grades
     if (!isAdmin && grades.length === 0) {

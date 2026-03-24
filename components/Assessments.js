@@ -10,15 +10,16 @@ const html = htm.bind(h);
 export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [], allowedReligion = '' }) => {
     const allSettingsGrades = data?.settings?.grades || [];
     
-    // FOR TEACHERS: Only show their assigned grades - filter strictly
+    // FOR TEACHERS: Only show their assigned grades - filter with case-insensitive matching
     let availableGrades;
     if (isAdmin) {
         // Admin sees all grades
         availableGrades = allSettingsGrades;
     } else {
-        // Teacher: ONLY show grades they're assigned to
+        // Teacher: ONLY show grades they're assigned to (case-insensitive)
+        const allowedLower = allowedGrades.map(g => g.toLowerCase());
         availableGrades = allSettingsGrades.filter(g => 
-            allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
+            allowedLower.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase()))
         );
     }
     
@@ -74,12 +75,15 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [examTotal, setExamTotal] = useState(100);
 
-    // Auto-select first available grade
+    // Auto-select first available grade on mount or when grades change
+    const [initialGradeSet, setInitialGradeSet] = useState(false);
     useEffect(() => {
-        if (!selectedGrade && gradesToUse.length > 0) {
+        if (!initialGradeSet && gradesToUse.length > 0 && !selectedGrade) {
+            console.log('Auto-selecting grade:', gradesToUse[0]);
             setSelectedGrade(gradesToUse[0]);
+            setInitialGradeSet(true);
         }
-    }, [gradesToUse, selectedGrade]);
+    }, [gradesToUse, initialGradeSet, selectedGrade]);
 
     const streams = data?.settings?.streams || [];
     
@@ -91,13 +95,14 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     if (isAdmin) {
         // Admin sees all subjects
         availableSubjects = allSubjects;
-    } else if (allowedSubjects.length > 0 && selectedGrade) {
-        // Teacher: ONLY show subjects they're assigned to for this grade
-        // Match case-insensitively
+    } else if (selectedGrade) {
+        // Teacher: Show subjects they're assigned to for this grade, plus all grade subjects as fallback
         const teacherLower = allowedSubjects.map(s => s.toLowerCase());
-        availableSubjects = allSubjects.filter(s => 
+        const teacherSubjects = allSubjects.filter(s => 
             teacherLower.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase()))
         );
+        // If teacher has assigned subjects, use those; otherwise use all grade subjects
+        availableSubjects = teacherSubjects.length > 0 ? teacherSubjects : allSubjects;
     } else {
         availableSubjects = [];
     }
@@ -123,7 +128,8 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     }, [selectedGrade, subjects]);
     
     const filteredStudents = (data?.students || []).filter(s => {
-        const inGrade = s.grade === selectedGrade;
+        // Case-insensitive grade matching
+        const inGrade = selectedGrade && s.grade && (s.grade.toLowerCase() === selectedGrade.toLowerCase() || s.grade === selectedGrade);
         if (!inGrade) return false;
         
         const inStream = selectedStream === 'ALL' || s.stream === selectedStream;
@@ -151,16 +157,23 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         const studentIdStr = String(studentId);
         const academicYear = data.settings?.academicYear || '2025/2026';
         
+        // Find existing assessment with better matching
         const existing = data.assessments.find(a => 
-            String(a.studentId) === studentIdStr && 
+            (String(a.studentId) === studentIdStr || String(a.studentId) === String(studentId)) && 
             a.subject === selectedSubject && 
             a.term === selectedTerm && 
             a.examType === selectedExamType &&
             a.academicYear === academicYear
         );
+        
+        // Remove existing and keep other assessments
         const otherAssessments = data.assessments.filter(a => 
-            !(String(a.studentId) === studentIdStr && a.subject === selectedSubject && a.term === selectedTerm && a.examType === selectedExamType && a.academicYear === academicYear)
+            !((String(a.studentId) === studentIdStr || String(a.studentId) === String(studentId)) && a.subject === selectedSubject && a.term === selectedTerm && a.examType === selectedExamType && a.academicYear === academicYear)
         );
+        
+        // Get student's actual grade from data
+        const student = (data.students || []).find(s => String(s.id) === studentIdStr || s.admissionNo === studentIdStr);
+        const studentGrade = student?.grade || selectedGrade;
         
         let level = existing?.level || 'ME2';
         let score = existing?.score || 0;
@@ -184,7 +197,9 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         const newAssessment = {
             id: existing?.id || ('A-' + Date.now() + Math.random().toString().slice(2, 6)),
             studentId: studentIdStr,
-            grade: selectedGrade,
+            studentAdmissionNo: student?.admissionNo || '',
+            studentName: student?.name || '',
+            grade: studentGrade,
             subject: selectedSubject,
             term: selectedTerm,
             examType: selectedExamType,
@@ -198,12 +213,11 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         
         // Track activity
         const action = existing ? 'EDIT' : 'ADD';
-        trackActivity(action, newAssessment, existing);
         
         // 1. SAVE LOCALLY FIRST
         const updatedAssessments = [...otherAssessments, newAssessment];
         setData({ ...data, assessments: updatedAssessments });
-        console.log('✓ Assessment saved locally:', newAssessment.id, '- Subject:', newAssessment.subject);
+        console.log('✓ Assessment saved:', newAssessment.id, '- Grade:', newAssessment.grade, '- Subject:', newAssessment.subject, '- Score:', newAssessment.score, '- Term:', newAssessment.term);
         
         // 2. SYNC TO GOOGLE SHEET (fire and forget, don't block)
         if (data.settings?.googleScriptUrl) {
@@ -305,11 +319,6 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         
         const assessmentToDelete = data.assessments.find(a => a.id === assessmentId);
         const updatedAssessments = data.assessments.filter(a => a.id !== assessmentId);
-        
-        // Track activity before deleting
-        if (assessmentToDelete) {
-            trackActivity('DELETE', assessmentToDelete);
-        }
         
         setData({ ...data, assessments: updatedAssessments });
         
@@ -620,7 +629,8 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                                  a.studentAdmissionNo === student.admissionNo) && 
                                 a.subject === selectedSubject && 
                                 a.term === selectedTerm && 
-                                a.examType === selectedExamType
+                                a.examType === selectedExamType &&
+                                a.academicYear === (data.settings?.academicYear || '2025/2026')
                             );
                             return html`
                                 <div key=${student.id} class="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
