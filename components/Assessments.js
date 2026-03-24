@@ -7,12 +7,63 @@ import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
-    const allGrades = data?.settings?.grades || [];
-    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
-    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
-
-    const [selectedGrade, setSelectedGrade] = useState(gradesToUse[0] || 'GRADE 1');
+export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [], allowedReligion = '' }) => {
+    const allSettingsGrades = data?.settings?.grades || [];
+    
+    // FOR TEACHERS: Only show their assigned grades - filter strictly
+    let availableGrades;
+    if (isAdmin) {
+        // Admin sees all grades
+        availableGrades = allSettingsGrades;
+    } else {
+        // Teacher: ONLY show grades they're assigned to
+        availableGrades = allSettingsGrades.filter(g => 
+            allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
+        );
+    }
+    
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : [];
+    
+    // Show message if teacher has no grades assigned
+    const hasNoAccess = !isAdmin && gradesToUse.length === 0;
+    
+    // Show access denied message for teachers with no grades
+    if (hasNoAccess) {
+        return html`
+            <div class="p-8 text-center">
+                <div class="text-4xl mb-4">🔒</div>
+                <h2 class="text-xl font-bold text-slate-700 mb-2">No Access Assigned</h2>
+                <p class="text-slate-500 mb-4">You have not been assigned any grades or subjects to manage.</p>
+                <p class="text-sm text-slate-400">Please contact the administrator to assign your teaching subjects and grades.</p>
+            </div>
+        `;
+    }
+    
+    // Helper to check if user can access a specific grade
+    const canAccessGrade = (grade) => {
+        if (isAdmin) return true;
+        return availableGrades.includes(grade);
+    };
+    
+    // Helper to check if user can access a specific subject
+    const canAccessSubject = (subject) => {
+        if (isAdmin) return true;
+        if (!subject || !allowedSubjects.length) return false;
+        const subjectLower = subject.toLowerCase();
+        return allowedSubjects.some(as => subjectLower.includes(as.toLowerCase()) || as.toLowerCase().includes(subjectLower));
+    };
+    
+    // Helper function to find student for assessment
+    const findStudentForAssessment = (assessment) => {
+        if (!assessment) return null;
+        return (data.students || []).find(s => 
+            String(s.id) === String(assessment.studentId) ||
+            String(s.admissionNo) === String(assessment.studentId) ||
+            s.admissionNo === assessment.studentAdmissionNo
+        );
+    };
+    
+    const [selectedGrade, setSelectedGrade] = useState('');
     const [selectedStream, setSelectedStream] = useState('ALL');
     const [selectedSubject, setSelectedSubject] = useState('');
     const [selectedTerm, setSelectedTerm] = useState('T1');
@@ -23,85 +74,53 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [examTotal, setExamTotal] = useState(100);
 
-    const streams = data?.settings?.streams || [];
-    const allSubjects = Storage.getSubjectsForGrade(selectedGrade);
-    const availableSubjects = isAdmin ? allSubjects : allSubjects.filter(s => allowedSubjects.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase())));
-    const subjects = availableSubjects.length > 0 ? availableSubjects : ['-- No Assigned Subjects --'];
-
-    // Track activity helper
-    const trackActivity = async (action, assessment, oldData = null) => {
-        if (!data.settings?.googleScriptUrl) return;
-        
-        try {
-            googleSheetSync.setSettings(data.settings);
-            const student = data.students?.find(s => String(s.id) === String(assessment.studentId));
-            
-            await googleSheetSync.trackActivity(
-                action,
-                'Assessments',
-                assessment.id,
-                student?.name || assessment.studentName || 'Unknown Student',
-                `${assessment.subject} - ${assessment.term} ${assessment.examType}: Score ${assessment.score}`,
-                oldData,
-                assessment
-            );
-        } catch (err) {
-            console.warn('Activity tracking failed:', err.message);
-        }
-    };
-
-    // Create a robust student lookup map - rebuild when data.students changes
-    const studentLookup = useMemo(() => {
-        const map = new Map();
-        if (data?.students) {
-            data.students.forEach(s => {
-                // Key by ID (both string and number variants)
-                map.set(String(s.id), s);
-                map.set(String(Number(s.id)), s);
-                // Also key by admissionNo for Google Sheet data matching
-                if (s.admissionNo) {
-                    map.set(String(s.admissionNo).toLowerCase().trim(), s);
-                    map.set(String(s.admissionNo).toUpperCase().trim(), s);
-                }
-            });
-        }
-        return map;
-    }, [data?.students]);
-
-    // Helper function to find student for an assessment
-    const findStudentForAssessment = (assessment) => {
-        // Try various ID formats
-        let student = studentLookup.get(String(assessment.studentId));
-        if (student) return student;
-        
-        student = studentLookup.get(String(Number(assessment.studentId)));
-        if (student) return student;
-        
-        // Try matching by admissionNo stored in assessment (if synced from another device)
-        if (assessment.studentAdmissionNo) {
-            student = studentLookup.get(String(assessment.studentAdmissionNo).toLowerCase().trim());
-            if (student) return student;
-            student = studentLookup.get(String(assessment.studentAdmissionNo).toUpperCase().trim());
-            if (student) return student;
-        }
-        
-        // Try matching by studentName if available
-        if (assessment.studentName) {
-            const nameLower = assessment.studentName.toLowerCase().trim();
-            student = data?.students?.find(s => 
-                s.name && s.name.toLowerCase().trim() === nameLower
-            );
-            if (student) return student;
-        }
-        
-        return null;
-    };
-
+    // Auto-select first available grade
     useEffect(() => {
-        if (!subjects.includes(selectedSubject)) {
-            setSelectedSubject(subjects[0]);
+        if (!selectedGrade && gradesToUse.length > 0) {
+            setSelectedGrade(gradesToUse[0]);
         }
-    }, [selectedGrade]);
+    }, [gradesToUse, selectedGrade]);
+
+    const streams = data?.settings?.streams || [];
+    
+    // Get subjects ONLY for the selected grade
+    const allSubjects = selectedGrade ? Storage.getSubjectsForGrade(selectedGrade) : [];
+    
+    // FOR TEACHERS: Only show their assigned subjects for their grades
+    let availableSubjects;
+    if (isAdmin) {
+        // Admin sees all subjects
+        availableSubjects = allSubjects;
+    } else if (allowedSubjects.length > 0 && selectedGrade) {
+        // Teacher: ONLY show subjects they're assigned to for this grade
+        // Match case-insensitively
+        const teacherLower = allowedSubjects.map(s => s.toLowerCase());
+        availableSubjects = allSubjects.filter(s => 
+            teacherLower.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase()))
+        );
+    } else {
+        availableSubjects = [];
+    }
+    
+    // Filter by religion if needed
+    availableSubjects = availableSubjects.filter(s => {
+        if (!allowedReligion) return true;
+        if (s.toUpperCase().includes('CRE')) return allowedReligion === 'christian';
+        if (s.toUpperCase().includes('IRE')) return allowedReligion === 'islam';
+        if (s.toUpperCase().includes('HRE')) return allowedReligion === 'hindu';
+        return true;
+    });
+    
+    const subjects = availableSubjects.length > 0 ? availableSubjects : [];
+    
+    // Auto-select first subject when grade changes, OR show message if no subjects
+    useEffect(() => {
+        if (selectedGrade && subjects.length > 0 && !selectedSubject) {
+            setSelectedSubject(subjects[0]);
+        } else if (selectedGrade && subjects.length === 0) {
+            setSelectedSubject('');
+        }
+    }, [selectedGrade, subjects]);
     
     const filteredStudents = (data?.students || []).filter(s => {
         const inGrade = s.grade === selectedGrade;
@@ -114,6 +133,9 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
             (s.name && s.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
             (s.admissionNo && s.admissionNo.toLowerCase().includes(searchTerm.toLowerCase()));
         if (!matchesSearch) return false;
+
+        const matchesReligion = !allowedReligion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
+        if (!matchesReligion) return false;
         
         // For Senior School, filter students by their chosen electives
         const seniorGrades = ['GRADE 10', 'GRADE 11', 'GRADE 12'];

@@ -17,15 +17,38 @@ const getMonday = (date) => {
 
 export const Attendance = ({ data, setData, isAdmin, teacherSession, allowedGrades = [] }) => {
     const allGrades = data?.settings?.grades || [];
-    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
-    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
+    
+    // Teachers: ONLY show exact grades they're assigned to
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => 
+        allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
+    );
+    
+    // Show no access if no grades assigned
+    if (!isAdmin && availableGrades.length === 0) {
+        return html`
+            <div class="p-8 text-center">
+                <div class="text-4xl mb-4">🔒</div>
+                <h2 class="text-xl font-bold text-slate-700 mb-2">No Access Assigned</h2>
+                <p class="text-slate-500">You have not been assigned any grades to manage.</p>
+            </div>
+        `;
+    }
+    
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : [];
 
-    const [selectedGrade, setSelectedGrade] = useState(gradesToUse[0] || 'GRADE 1');
+    const [selectedGrade, setSelectedGrade] = useState('');
     const [selectedStream, setSelectedStream] = useState('ALL');
     const [selectedTerm, setSelectedTerm] = useState('T1');
     const [selectedWeek, setSelectedWeek] = useState(1);
     const [showPrintModal, setShowPrintModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+
+    // Auto-select first grade
+    useEffect(() => {
+        if (!selectedGrade && gradesToUse.length > 0) {
+            setSelectedGrade(gradesToUse[0]);
+        }
+    }, [gradesToUse, selectedGrade]);
 
     const streams = data?.settings?.streams || [];
 

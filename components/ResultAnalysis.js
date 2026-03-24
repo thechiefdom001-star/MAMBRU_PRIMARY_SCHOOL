@@ -8,14 +8,30 @@ const html = htm.bind(h);
 
 export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession, allowedSubjects = [], allowedGrades = [] }) => {
     const allGrades = data?.settings?.grades || [];
-    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => allowedGrades.some(ag => g.toLowerCase().includes(ag) || ag.includes(g.toLowerCase())));
-    const gradesToUse = availableGrades.length > 0 ? availableGrades : ['-- No Assigned Grades --'];
+    
+    // Teachers: ONLY show exact grades they're assigned to
+    const availableGrades = isAdmin ? allGrades : allGrades.filter(g => 
+        allowedGrades.some(ag => g.toLowerCase() === ag.toLowerCase() || g === ag)
+    );
+    
+    // Show no access if no grades assigned
+    if (!isAdmin && availableGrades.length === 0) {
+        return html`
+            <div class="p-8 text-center">
+                <div class="text-4xl mb-4">🔒</div>
+                <h2 class="text-xl font-bold text-slate-700 mb-2">No Access Assigned</h2>
+                <p class="text-slate-500">You have not been assigned any grades to view.</p>
+            </div>
+        `;
+    }
+    
+    const gradesToUse = availableGrades.length > 0 ? availableGrades : [];
 
     const [filterTerm, setFilterTerm] = useState('T1');
-    const [filterGrade, setFilterGrade] = useState(gradesToUse[0] || 'GRADE 1');
+    const [filterGrade, setFilterGrade] = useState(gradesToUse[0] || '');
     const [filterStream, setFilterStream] = useState('ALL');
     const [filterSubject, setFilterSubject] = useState('ALL');
-    const [filterYear, setFilterYear] = useState(data.settings.academicYear || '2025/2026');
+    const [filterYear, setFilterYear] = useState(data.settings?.academicYear || '2025/2026');
     const [searchName, setSearchName] = useState('');
 
     const streams = data?.settings?.streams || [];
@@ -34,9 +50,13 @@ export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession,
         return s.stream === filterStream;
     });
     const assessments = data.assessments || [];
-    const allSubjects = Storage.getSubjectsForGrade(filterGrade);
-    const availableSubjects = isAdmin ? allSubjects : allSubjects.filter(s => allowedSubjects.some(as => s.toLowerCase().includes(as) || as.includes(s.toLowerCase())));
-    const subjects = availableSubjects.length > 0 ? availableSubjects : ['-- No Assigned Subjects --'];
+    const allSubjects = filterGrade ? Storage.getSubjectsForGrade(filterGrade) : [];
+    
+    // Teachers: ONLY show their subjects for the selected grade
+    const availableSubjects = isAdmin ? allSubjects : allSubjects.filter(s => 
+        allowedSubjects.some(as => s.toLowerCase().includes(as.toLowerCase()) || as.toLowerCase().includes(s.toLowerCase()))
+    );
+    const subjects = availableSubjects.length > 0 ? availableSubjects : [];
     const examTypes = ['Opener', 'Mid-Term', 'End-Term'];
 
     const analysisData = useMemo(() => {

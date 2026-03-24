@@ -15,10 +15,48 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
     const [subjects, setSubjects] = useState('');
     const [grades, setGrades] = useState('');
     const [classTeacherGrade, setClassTeacherGrade] = useState('');
+    const [religion, setReligion] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    
+    // Grade-based subjects mapping
+    const gradeSubjects = {
+        'PP1': ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'],
+        'PP2': ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'],
+        'GRADE 1': ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'],
+        'GRADE 2': ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'],
+        'GRADE 3': ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'],
+        'GRADE 4': ['ENGLISH', 'KISWAHILI/KSL', 'MATHEMATICS', 'AGRICULTURE', 'SOCIAL STUDIES', 'RELIGIOUS EDUCATION', 'CREATIVE ARTS', 'SCIENCE & TECHNOLOGY'],
+        'GRADE 5': ['ENGLISH', 'KISWAHILI/KSL', 'MATHEMATICS', 'AGRICULTURE', 'SOCIAL STUDIES', 'RELIGIOUS EDUCATION', 'CREATIVE ARTS', 'SCIENCE & TECHNOLOGY'],
+        'GRADE 6': ['ENGLISH', 'KISWAHILI/KSL', 'MATHEMATICS', 'AGRICULTURE', 'SOCIAL STUDIES', 'RELIGIOUS EDUCATION', 'CREATIVE ARTS', 'SCIENCE & TECHNOLOGY'],
+        'GRADE 7': ['ENGLISH', 'MATHEMATICS', 'KISWAHILI/KSL', 'SOCIAL STUDIES', 'PRE-TECHNICAL STUDIES', 'CREATIVE ARTS & SPORTS', 'AGRICULTURE & NUTRITION', 'INTEGRATED SCIENCE', 'RELIGIOUS EDUCATION'],
+        'GRADE 8': ['ENGLISH', 'MATHEMATICS', 'KISWAHILI/KSL', 'SOCIAL STUDIES', 'PRE-TECHNICAL STUDIES', 'CREATIVE ARTS & SPORTS', 'AGRICULTURE & NUTRITION', 'INTEGRATED SCIENCE', 'RELIGIOUS EDUCATION'],
+        'GRADE 9': ['ENGLISH', 'MATHEMATICS', 'KISWAHILI/KSL', 'SOCIAL STUDIES', 'PRE-TECHNICAL STUDIES', 'CREATIVE ARTS & SPORTS', 'AGRICULTURE & NUTRITION', 'INTEGRATED SCIENCE', 'RELIGIOUS EDUCATION'],
+        'GRADE 10': ['English', 'Kiswahili', 'Mathematics', 'CSL', 'Biology', 'Chemistry', 'Physics', 'Agriculture', 'Computer Studies', 'History and Citizenship', 'Geography', 'CRE', 'IRE', 'Accounting', 'Economics', 'Fine Arts', 'Music and Dance', 'Sports Science', 'Business Studies'],
+        'GRADE 11': ['English', 'Kiswahili', 'Mathematics', 'CSL', 'Biology', 'Chemistry', 'Physics', 'Agriculture', 'Computer Studies', 'History and Citizenship', 'Geography', 'CRE', 'IRE', 'Accounting', 'Economics', 'Fine Arts', 'Music and Dance', 'Sports Science', 'Business Studies'],
+        'GRADE 12': ['English', 'Kiswahili', 'Mathematics', 'CSL', 'Biology', 'Chemistry', 'Physics', 'Agriculture', 'Computer Studies', 'History and Citizenship', 'Geography', 'CRE', 'IRE', 'Accounting', 'Economics', 'Fine Arts', 'Music and Dance', 'Sports Science', 'Business Studies']
+    };
+    
+    const allGrades = ['PP1', 'PP2', 'GRADE 1', 'GRADE 2', 'GRADE 3', 'GRADE 4', 'GRADE 5', 'GRADE 6', 'GRADE 7', 'GRADE 8', 'GRADE 9', 'GRADE 10', 'GRADE 11', 'GRADE 12'];
+    
+    // Get available subjects based on selected grades
+    const getAvailableSubjects = () => {
+        const selectedGrades = grades.split(',').map(g => g.trim()).filter(g => g);
+        const availableSubjects = new Set();
+        
+        selectedGrades.forEach(grade => {
+            const normalizedGrade = allGrades.find(g => grade.toUpperCase() === g) || grade;
+            if (gradeSubjects[normalizedGrade]) {
+                gradeSubjects[normalizedGrade].forEach(s => availableSubjects.add(s));
+            }
+        });
+        
+        return Array.from(availableSubjects).sort();
+    };
+    
+    const availableSubjectList = grades ? getAvailableSubjects() : [];
 
     useEffect(() => {
         if (settings?.googleScriptUrl) {
@@ -57,6 +95,7 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                     subjects: result.subjects || '',
                     grades: result.grades || '',
                     classTeacherGrade: result.classTeacherGrade || '',
+                    religion: result.religion || '',
                     isTeacher: true
                 };
 
@@ -112,20 +151,70 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                 role,
                 subjects,
                 grades,
-                classTeacherGrade
+                classTeacherGrade,
+                religion
             );
 
             if (result.success) {
+                // Also save locally for offline/login support
+                const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
+                creds.push({
+                    username: username.trim().toLowerCase(),
+                    password: password,
+                    name: name || username,
+                    role: role,
+                    subjects: subjects,
+                    grades: grades,
+                    classTeacherGrade: classTeacherGrade,
+                    religion: religion
+                });
+                localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
+                
                 setSuccess('Account created! You can now login.');
                 setMode('login');
                 setPassword('');
                 setConfirmPassword('');
             } else {
-                setError(result.error || 'Registration failed');
+                // Still save locally if Google fails
+                const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
+                if (!creds.find(c => c.username === username.trim().toLowerCase())) {
+                    creds.push({
+                        username: username.trim().toLowerCase(),
+                        password: password,
+                        name: name || username,
+                        role: role,
+                        subjects: subjects,
+                        grades: grades,
+                        classTeacherGrade: classTeacherGrade,
+                        religion: religion
+                    });
+                    localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
+                }
+                setSuccess('Account created locally! You can now login.');
+                setMode('login');
+                setPassword('');
+                setConfirmPassword('');
             }
         } catch (err) {
-            setError('Registration failed. Please try again.');
-            console.error('Register error:', err);
+            // Save locally anyway
+            const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
+            if (!creds.find(c => c.username === username.trim().toLowerCase())) {
+                creds.push({
+                    username: username.trim().toLowerCase(),
+                    password: password,
+                    name: name || username,
+                    role: role,
+                    subjects: subjects,
+                    grades: grades,
+                    classTeacherGrade: classTeacherGrade,
+                    religion: religion
+                });
+                localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
+            }
+            setSuccess('Account saved locally! You can now login.');
+            setMode('login');
+            setPassword('');
+            setConfirmPassword('');
         }
 
         setLoading(false);
@@ -142,6 +231,7 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
         setSubjects('');
         setGrades('');
         setClassTeacherGrade('');
+        setReligion('');
     };
 
     return html`
@@ -263,28 +353,88 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                                 </select>
                             </div>
 
+                            <div>
+                                <label class="block text-sm font-bold text-slate-600 mb-1">Religion (For Religion Teachers)</label>
+                                <select
+                                    value=${religion}
+                                    onChange=${e => setReligion(e.target.value)}
+                                    class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">None / All</option>
+                                    <option value="Christian">Christian</option>
+                                    <option value="Islam">Islam</option>
+                                    <option value="Hindu">Hindu</option>
+                                </select>
+                            </div>
+
                             ${(role === 'teacher' || role === 'class_teacher') && html`
                                 <div>
-                                    <label class="block text-sm font-bold text-slate-600 mb-1">Subjects Taught</label>
-                                    <input
-                                        type="text"
-                                        value=${subjects}
-                                        onInput=${e => setSubjects(e.target.value)}
-                                        placeholder="E.g., Math, English (comma separated)"
-                                        class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
+                                    <label class="block text-sm font-bold text-slate-600 mb-1">Grades/Classes Taught (Select all that apply)</label>
+                                    <div class="border border-slate-200 rounded-lg p-3 max-h-40 overflow-y-auto bg-slate-50">
+                                        ${allGrades.map(grd => html`
+                                            <label class="flex items-center gap-2 py-1 cursor-pointer hover:bg-slate-100 rounded px-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked=${grades.split(',').map(g => g.trim()).includes(grd)}
+                                                    onChange=${e => {
+                                                        const current = grades.split(',').map(g => g.trim()).filter(g => g);
+                                                        if (e.target.checked) {
+                                                            current.push(grd);
+                                                        } else {
+                                                            const idx = current.indexOf(grd);
+                                                            if (idx > -1) current.splice(idx, 1);
+                                                        }
+                                                        setGrades(current.join(', '));
+                                                    }}
+                                                    class="rounded text-blue-600"
+                                                />
+                                                <span class="text-sm">${grd}</span>
+                                            </label>
+                                        `)}
+                                    </div>
                                 </div>
-
-                                <div>
-                                    <label class="block text-sm font-bold text-slate-600 mb-1">Grades/Classes Taught</label>
-                                    <input
-                                        type="text"
-                                        value=${grades}
-                                        onInput=${e => setGrades(e.target.value)}
-                                        placeholder="E.g., GRADE 1, GRADE 2 (comma separated)"
-                                        class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
+                                
+                                ${grades && html`
+                                    <div>
+                                        <label class="block text-sm font-bold text-slate-600 mb-1">
+                                            Subjects for Selected Grades (${availableSubjectList.length} available)
+                                        </label>
+                                        ${availableSubjectList.length > 0 ? html`
+                                            <div class="border border-slate-200 rounded-lg p-3 max-h-48 overflow-y-auto bg-slate-50">
+                                                ${availableSubjectList.map(subj => html`
+                                                    <label class="flex items-center gap-2 py-1 cursor-pointer hover:bg-slate-100 rounded px-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked=${subjects.split(',').map(s => s.trim()).includes(subj)}
+                                                            onChange=${e => {
+                                                                const current = subjects.split(',').map(s => s.trim()).filter(s => s);
+                                                                if (e.target.checked) {
+                                                                    current.push(subj);
+                                                                } else {
+                                                                    const idx = current.indexOf(subj);
+                                                                    if (idx > -1) current.splice(idx, 1);
+                                                                }
+                                                                setSubjects(current.join(', '));
+                                                            }}
+                                                            class="rounded text-blue-600"
+                                                        />
+                                                        <span class="text-sm">${subj}</span>
+                                                    </label>
+                                                `)}
+                                            </div>
+                                        ` : html`
+                                            <p class="text-sm text-orange-600 bg-orange-50 p-2 rounded">Select grades above to see relevant subjects</p>
+                                        `}
+                                        <p class="text-xs text-slate-400 mt-1">Or type additional custom subjects</p>
+                                        <input
+                                            type="text"
+                                            value=${subjects}
+                                            onInput=${e => setSubjects(e.target.value)}
+                                            placeholder="Additional subjects (comma separated)"
+                                            class="w-full px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
+                                        />
+                                    </div>
+                                `}
                             `}
 
                             ${role === 'class_teacher' && html`

@@ -9,7 +9,7 @@ import { PrintButtons } from './PrintButtons.js';
 
 const html = htm.bind(h);
 
-export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSession }) => {
+export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSession, allowedReligion }) => {
     const [showAdd, setShowAdd] = useState(false);
     const [syncStatus, setSyncStatus] = useState('');
     const [filterGrade, setFilterGrade] = useState('ALL');
@@ -188,7 +188,8 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
             parentContact: '',
             stream: streams[0] || '',
             previousArrears: 0,
-            selectedFees: getDefaultFees()
+            selectedFees: getDefaultFees(),
+            religion: ''
         });
         setEditingId(null);
     };
@@ -333,8 +334,9 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
 
         const matchesGrade = filterGrade === 'ALL' || s.grade === filterGrade;
         const matchesStream = filterStream === 'ALL' || s.stream === filterStream;
+        const matchesReligion = !allowedReligion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
 
-        if (filterFinance === 'ALL') return matchesGrade && matchesStream;
+        if (filterFinance === 'ALL') return matchesGrade && matchesStream && matchesReligion;
 
         const feeStructure = data.settings.feeStructures?.find(f => f.grade === s.grade);
         const selectedKeys = s.selectedFees || ['t1', 't2', 't3'];
@@ -342,11 +344,11 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
         const totalPaid = (data.payments || []).filter(p => String(p.studentId) === String(s.id) && !p.voided).reduce((sum, p) => sum + Number(p.amount), 0);
         const balance = totalDue - totalPaid;
 
-        if (filterFinance === 'FULL') return matchesGrade && matchesStream && balance <= 0 && totalDue > 0;
-        if (filterFinance === 'HALF') return matchesGrade && matchesStream && totalPaid >= (totalDue / 2) && balance > 0;
-        if (filterFinance === 'ARREARS') return matchesGrade && matchesStream && balance > 0;
+        if (filterFinance === 'FULL') return matchesGrade && matchesStream && matchesReligion && balance <= 0 && totalDue > 0;
+        if (filterFinance === 'HALF') return matchesGrade && matchesStream && matchesReligion && totalPaid >= (totalDue / 2) && balance > 0;
+        if (filterFinance === 'ARREARS') return matchesGrade && matchesStream && matchesReligion && balance > 0;
 
-        return matchesGrade && matchesStream;
+        return matchesGrade && matchesStream && matchesReligion;
     });
 
     // Pagination
@@ -530,6 +532,19 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                             />
                         </div>
                         <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Religion</label>
+                            <select
+                                class="w-full p-3 bg-slate-50 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 outline-none"
+                                value=${newStudent.religion}
+                                onChange=${(e) => setNewStudent({ ...newStudent, religion: e.target.value })}
+                            >
+                                <option value="">Select Religion</option>
+                                <option value="Christian">Christian</option>
+                                <option value="Islam">Islam</option>
+                                <option value="Hindu">Hindu</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
                             <label class="text-[10px] font-bold text-orange-600 uppercase ml-1">Prev. Arrears (Bal B/F)</label>
                             <input 
                                 type="number"
@@ -585,6 +600,7 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Adm Date</th>
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">UPI No</th>
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Assess No</th>
+                            <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Religion</th>
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Parent Contact</th>
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Grade</th>
                             <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase no-print">Action</th>
@@ -606,6 +622,16 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                                 <td class="px-6 py-4 text-slate-500 text-xs font-mono">${student.admissionDate || '-'}</td>
                                 <td class="px-6 py-4 text-slate-500 text-xs font-mono">${student.upiNo || '-'}</td>
                                 <td class="px-6 py-4 text-slate-500 text-xs font-mono">${student.assessmentNo || '-'}</td>
+                                <td class="px-6 py-4">
+                                    <span class=${`px-2 py-1 rounded-full text-[9px] font-black uppercase ${
+                                        student.religion === 'Christian' ? 'bg-blue-100 text-blue-700' :
+                                        student.religion === 'Islam' ? 'bg-green-100 text-green-700' :
+                                        student.religion === 'Hindu' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-slate-100 text-slate-400'
+                                    }`}>
+                                        ${student.religion || 'NONE'}
+                                    </span>
+                                </td>
                                 <td class="px-6 py-4 text-slate-700 text-xs font-bold">${student.parentContact || '-'}</td>
                                 <td class="px-6 py-4">
                                     <div class="flex flex-col gap-1">

@@ -25,14 +25,53 @@ const SHEET_NAMES = {
   ACTIVITY_LOG: 'ActivityLog'  // For logging all user activities
 };
 
+// Rate limiting configuration
+const RATE_LIMIT = {
+  MAX_REQUESTS_PER_MINUTE: 30,
+  MAX_REQUESTS_PER_HOUR: 500
+};
+
+// Simple in-memory rate limiting (resets on script reload)
+var RATE_LIMIT_STORAGE = {
+  requests: [],
+  reset: function() {
+    const oneHourAgo = Date.now() - 3600000;
+    this.requests = this.requests.filter(t => t > oneHourAgo);
+  },
+  canProceed: function() {
+    this.reset();
+    const oneMinuteAgo = Date.now() - 60000;
+    const recentRequests = this.requests.filter(t => t > oneMinuteAgo).length;
+    
+    if (recentRequests >= this.MAX_REQUESTS_PER_MINUTE) {
+      return false;
+    }
+    if (this.requests.length >= this.MAX_REQUESTS_PER_HOUR) {
+      return false;
+    }
+    this.requests.push(Date.now());
+    return true;
+  }
+};
+
+/**
+ * Check rate limit before processing request
+ */
+function checkRateLimit() {
+  if (!RATE_LIMIT_STORAGE.canProceed()) {
+    return { success: false, error: 'Rate limit exceeded. Please try again later.' };
+  }
+  return null;
+}
+
 // Column headers for each sheet
-const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'admissionDate', 'upiNo', 'assessmentNo', 'parentContact', 'category', 'previousArrears', 'selectedFees'];
+const STUDENT_HEADERS = ['id', 'name', 'grade', 'stream', 'admissionNo', 'admissionDate', 'upiNo', 'assessmentNo', 'parentContact', 'category', 'previousArrears', 'selectedFees', 'religion'];
 const ASSESSMENT_HEADERS = ['id', 'studentId', 'studentAdmissionNo', 'studentName', 'grade', 'subject', 'score', 'term', 'examType', 'academicYear', 'date', 'level', 'rawScore', 'maxScore'];
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
 const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo', 'isClassTeacher', 'classTeacherGrade'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
 const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt'];
-const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin', 'subjects', 'grades', 'classTeacherGrade'];
+const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin', 'subjects', 'grades', 'classTeacherGrade', 'religion'];
 const ACTIVITY_LOG_HEADERS = ['id', 'userId', 'userName', 'userRole', 'action', 'module', 'recordId', 'recordName', 'details', 'oldValue', 'newValue', 'timestamp', 'ipAddress'];
 
 /**
@@ -47,7 +86,7 @@ function sanitizeRecord(record) {
   const stringFields = ['id', 'name', 'grade', 'stream', 'admissionNo', 'admissionDate', 'upiNo', 'assessmentNo', 'parentContact', 'selectedFees', 
                         'subject', 'term', 'examType', 'academicYear', 'date', 'level', 'status',
                         'receiptNo', 'method', 'reference', 'role', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo',
-                        'voided', 'voidedBy', 'studentId', 'studentAdmissionNo', 'studentName', 'category', 'previousArrears', 'rawScore', 'maxScore'];
+                        'voided', 'voidedBy', 'studentId', 'studentAdmissionNo', 'studentName', 'category', 'previousArrears', 'rawScore', 'maxScore', 'religion'];
   
   // Allowed numeric fields
   const numericFields = ['score', 'amount'];
@@ -204,6 +243,14 @@ function updateAssessmentSheetHeaders(sheet) {
  * Secured with input validation
  */
 function doGet(e) {
+  // Apply rate limiting
+  const rateCheck = checkRateLimit();
+  if (rateCheck) {
+    return ContentService
+      .createTextOutput(JSON.stringify(rateCheck))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   initializeSheets();
   
   const action = e.parameter.action || 'getAll';
@@ -492,7 +539,8 @@ function doGet(e) {
           role: regData.role || e.parameter.role,
           subjects: regData.subjects || e.parameter.subjects,
           grades: regData.grades || e.parameter.grades,
-          classTeacherGrade: regData.classTeacherGrade || e.parameter.classTeacherGrade
+          classTeacherGrade: regData.classTeacherGrade || e.parameter.classTeacherGrade,
+          religion: regData.religion || e.parameter.religion
         });
         break;
         
@@ -569,6 +617,14 @@ function doGet(e) {
  * POST endpoint - Add/Update records
  */
 function doPost(e) {
+  // Apply rate limiting
+  const rateCheck = checkRateLimit();
+  if (rateCheck) {
+    return ContentService
+      .createTextOutput(JSON.stringify(rateCheck))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   initializeSheets();
   
   let data = {};
@@ -801,7 +857,29 @@ function doPost(e) {
         response = { success: true, message: 'Batch sync complete', results };
         break;
         
-      // ═══════════════════════════════════════════════════════════════
+      // GET-like actions via POST (to avoid CORS redirect issues)
+      case 'getAll':
+        response = {
+          students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
+          assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
+          attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
+          teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
+          staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
+          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS)
+        };
+        break;
+        
+      case 'getActiveUsers':
+        response = getActiveUsers();
+        break;
+        
+      case 'setActive':
+        response = setActiveUser(data.device, data.timestamp);
+        break;
+        
+      // ═══════════════════════════════════════════════════════════════════
+      // TEACHER AUTHENTICATION HANDLERS
+      // ═══════════════════════════════════════════════════════════════════
       // TEACHER AUTHENTICATION HANDLERS
       // ═══════════════════════════════════════════════════════════════
       
@@ -814,7 +892,8 @@ function doPost(e) {
           role: data.role,
           subjects: data.subjects,
           grades: data.grades,
-          classTeacherGrade: data.classTeacherGrade
+          classTeacherGrade: data.classTeacherGrade,
+          religion: data.religion
         });
         break;
         
@@ -1278,9 +1357,16 @@ function testSetup() {
 
 /**
  * Track active users - update last activity timestamp
+ * Uses session ID for deduplication to prevent multiplication
  */
 function setActiveUser(deviceName, timestamp) {
   try {
+    if (!deviceName || deviceName.length < 3) {
+      return { success: false, error: 'Invalid device name' };
+    }
+    
+    console.log('🔔 setActiveUser called:', deviceName, 'timestamp:', timestamp);
+    
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
     
@@ -1289,30 +1375,84 @@ function setActiveUser(deviceName, timestamp) {
       activitySheet.appendRow(['device', 'lastActivity', 'timestamp']);
     }
     
-    // Find existing device or add new
-    const data = activitySheet.getDataRange().getValues();
-    const deviceRow = data.findIndex(row => row[0] === deviceName);
-    
-    const now = new Date(timestamp ? parseInt(timestamp) : Date.now());
-    const nowStr = now.toISOString();
     const ts = timestamp ? parseInt(timestamp) : Date.now();
     
-    if (deviceRow > 0) {
-      // Update existing row
-      activitySheet.getRange(deviceRow + 1, 2, 1, 2).setValues([[nowStr, ts.toString()]]);
-    } else {
-      // Add new row
-      activitySheet.appendRow([deviceName, nowStr, ts.toString()]);
+    // NO rate limiting - always allow updates to ensure users show up immediately
+    const now = Date.now();
+    
+    const data = activitySheet.getDataRange().getValues();
+    
+    // Find existing device - be flexible with matching
+    let deviceRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      const existingDevice = String(data[i][0] || '');
+      // Exact match or match without session ID (just the role@username part)
+      const userPart = deviceName.split('#')[0];
+      if (existingDevice === deviceName || existingDevice.startsWith(userPart)) {
+        deviceRow = i;
+        break;
+      }
     }
+    
+    const nowDate = new Date(ts);
+    const nowStr = nowDate.toISOString();
+    
+    if (deviceRow > 0) {
+      // Update existing row - always update to show latest activity
+      activitySheet.getRange(deviceRow + 1, 2, 1, 2).setValues([[nowStr, ts.toString()]]);
+      console.log('🔔 Updated existing user at row:', deviceRow + 1);
+    } else {
+      // Add new row - clean up any stale entries for this user first
+      const userPrefix = deviceName.split('#')[0];
+      
+      // Remove old entries with same user prefix (different sessions)
+      for (let i = data.length - 1; i > 0; i--) {
+        const existingDevice = String(data[i][0] || '');
+        if (existingDevice.startsWith(userPrefix)) {
+          activitySheet.deleteRow(i + 1);
+          console.log('🔔 Deleted stale entry:', existingDevice);
+        }
+      }
+      
+      activitySheet.appendRow([deviceName, nowStr, ts.toString()]);
+      console.log('🔔 Added new user:', deviceName);
+    }
+    
+    // Cleanup: Remove entries older than 3 minutes proactively
+    cleanupStaleActiveUsers(activitySheet, null);
+    
+    console.log('🔔 setActiveUser complete. Total rows now:', activitySheet.getLastRow());
     
     return { success: true, message: 'Active status updated', device: deviceName };
   } catch (error) {
+    console.error('🔔 setActiveUser error:', error);
     return { success: false, error: error.message };
   }
 }
 
 /**
- * Get active users - returns users active in last 5 minutes with details
+ * Clean up stale active user entries
+ */
+function cleanupStaleActiveUsers(activitySheet, existingData) {
+  try {
+    const data = existingData || activitySheet.getDataRange().getValues();
+    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+    
+    // Find and delete stale rows (skip header)
+    for (let i = data.length - 1; i > 0; i--) {
+      const ts = parseInt(data[i][2]);
+      if (ts && ts < tenMinutesAgo) {
+        activitySheet.deleteRow(i + 1);
+      }
+    }
+  } catch (e) {
+    // Silently fail cleanup
+  }
+}
+
+/**
+ * Get active users - returns users active in last 10 minutes with details
+ * Properly deduplicates sessions and counts unique users
  */
 function getActiveUsers() {
   try {
@@ -1320,27 +1460,34 @@ function getActiveUsers() {
     let activitySheet = ss.getSheetByName(SHEET_NAMES.ACTIVITY);
     
     if (!activitySheet) {
-      return { success: true, activeCount: 0, activeUsers: [], lastActivity: null };
+      console.log('🔔 No activity sheet found');
+      return { success: true, activeCount: 0, activeUsers: [], uniqueUsers: 0, lastActivity: null };
     }
     
+    // Get ALL data - don't cleanup first (let users accumulate)
     const data = activitySheet.getDataRange().getValues();
-    const headers = data[0];
+    console.log('🔔 getActiveUsers - Total rows in sheet:', data.length);
+    
     const rows = data.slice(1);
     
-    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-    let activeCount = 0;
+    // 10 minutes window (longer so users don't disappear quickly)
+    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
     let lastActivity = null;
     const activeUsers = [];
     
     rows.forEach(row => {
       const timestamp = parseInt(row[2]);
-      if (timestamp && timestamp > fiveMinutesAgo) {
-        activeCount++;
+      const device = String(row[0] || '');
+      
+      // Include users active in last 10 minutes
+      if (timestamp && timestamp > tenMinutesAgo && device) {
+        console.log('🔔 Found active user:', device, 'timestamp:', timestamp);
         activeUsers.push({
-          device: String(row[0] || 'Unknown Device'),
-          lastActivity: row[1] ? new Date(row[1]).toISOString() : new Date(timestamp).toISOString(),
+          device: device,
+          lastActivity: row[1] ? String(row[1]) : new Date(timestamp).toISOString(),
           timestamp: timestamp
         });
+        
         if (!lastActivity || timestamp > parseInt(lastActivity)) {
           lastActivity = timestamp;
         }
@@ -1349,14 +1496,27 @@ function getActiveUsers() {
     
     // Sort by most recent first
     activeUsers.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Remove exact duplicates (keep most recent per device)
+    const seenDevices = new Set();
+    const uniqueUsers = activeUsers.filter(u => {
+      if (seenDevices.has(u.device)) return false;
+      seenDevices.add(u.device);
+      return true;
+    });
+    
+    console.log('🔔 Returning active users:', uniqueUsers.length, uniqueUsers.map(u => u.device));
+    
     return { 
       success: true, 
-      activeCount: activeCount,
-      activeUsers: activeUsers,
+      activeCount: uniqueUsers.length,
+      uniqueUsers: uniqueUsers.length,
+      activeUsers: uniqueUsers,
       lastActivity: lastActivity ? lastActivity.toString() : null 
     };
   } catch (error) {
-    return { success: false, activeCount: 0, activeUsers: [], error: error.message };
+    console.error('🔔 getActiveUsers error:', error);
+    return { success: false, activeCount: 0, activeUsers: [], uniqueUsers: 0, error: error.message };
   }
 }
 
@@ -1572,7 +1732,7 @@ function simpleHash(str) {
  * action=registerTeacher
  */
 function registerTeacher(credentials) {
-  const { username, password, teacherId, name, role, subjects, grades, classTeacherGrade } = credentials;
+  const { username, password, teacherId, name, role, subjects, grades, classTeacherGrade, religion } = credentials;
   
   if (!username || !password) {
     return { success: false, error: 'Username and password are required' };
@@ -1608,7 +1768,8 @@ function registerTeacher(credentials) {
     '',  // lastLogin - empty initially
     subjects || '',
     grades || '',
-    classTeacherGrade || ''
+    classTeacherGrade || '',
+    religion || ''
   ]);
   
   return { 
@@ -1649,6 +1810,7 @@ function loginTeacher(credentials) {
     const storedSubjects = String(data[i][7] || '');
     const storedGrades = String(data[i][8] || '');
     const storedClassTeacherGrade = String(data[i][9] || '');
+    const storedReligion = String(data[i][10] || '');
     
     if (storedUsername === username.toLowerCase().trim() && storedHash === passwordHash) {
       // Update last login
@@ -1663,7 +1825,8 @@ function loginTeacher(credentials) {
         role: storedRole,
         subjects: storedSubjects,
         grades: storedGrades,
-        classTeacherGrade: storedClassTeacherGrade
+        classTeacherGrade: storedClassTeacherGrade,
+        religion: storedReligion
       };
     }
   }

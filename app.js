@@ -1,5 +1,5 @@
 import { h, render } from 'preact';
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { Dashboard } from './components/Dashboard.js';
 import { Students } from './components/Students.js';
@@ -60,6 +60,7 @@ const App = () => {
 
     const allowedTeacherSubjects = teacherSubjectsStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
     const allowedTeacherGrades = teacherGradesStr.split(',').map(g => g.trim().toLowerCase()).filter(g => g);
+    const allowedTeacherReligion = (teacherSession?.religion || activeTeacher?.religion || '').toLowerCase();
 
     // Derive selectedStudent from data.students to ensure it's always fresh
     const selectedStudent = selectedStudentId 
@@ -96,17 +97,42 @@ const App = () => {
     const [googleSyncStatus, setGoogleSyncStatus] = useState('');
     const [deviceId, setDeviceId] = useState('');
 
-    // Generate a unique device identifier for this browser session
+    // Generate a stable session ID that persists across refreshes
     useEffect(() => {
-        // Get or create the device identifier based on current login state
+        // Get username from admin login OR teacher session
         let storedUsername = localStorage.getItem('et_login_username');
         let username = loginUsername || storedUsername || 'guest';
-        const userRole = isAdmin ? 'admin' : 'teacher';
-        const browserInfo = /Firefox|Safari|Chrome|Edge/.exec(navigator.userAgent)?.[0] || 'Browser';
-        const newDeviceId = `${userRole}@${username}-${browserInfo}`;
         
+        // If teacher is logged in, use teacher name
+        if (teacherSession && !isAdmin) {
+            username = teacherSession.username || teacherSession.name || 'teacher';
+            console.log('📱 Teacher session detected, username:', username);
+        }
+        
+        const userRole = isAdmin ? 'admin' : 'teacher';
+        
+        // Check for existing stable session ID or create one
+        let stableSessionId = localStorage.getItem('et_session_id');
+        if (!stableSessionId) {
+            stableSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            localStorage.setItem('et_session_id', stableSessionId);
+        }
+        
+        // Use stable session ID combined with user role for consistent tracking
+        const newDeviceId = `${userRole}@${username}#${stableSessionId}`;
+        
+        console.log('📱 Setting deviceId:', newDeviceId, 'role:', userRole);
         setDeviceId(newDeviceId);
-    }, [loginUsername, isAdmin]);
+    }, [loginUsername, isAdmin, teacherSession]);
+
+    // Clear session ID on logout to prevent reuse
+    useEffect(() => {
+        const handleLogoutEvent = () => {
+            // Don't clear immediately - wait for new login
+        };
+        window.addEventListener('edutrack:logout', handleLogoutEvent);
+        return () => window.removeEventListener('edutrack:logout', handleLogoutEvent);
+    }, []);
 
     // Initialize login state from localStorage on app load
     useEffect(() => {
@@ -190,34 +216,42 @@ const App = () => {
         return () => window.removeEventListener('edutrack:restore', handler);
     }, []);
 
-    // Track user activity - update active status periodically
+    // Track user activity with proper rate limiting and deduplication
     useEffect(() => {
         if (!data?.settings?.googleScriptUrl || !deviceId) return;
         if (deviceId.includes('guest')) return;
 
+        let lastTrackTime = 0;
+        const MIN_TRACK_INTERVAL = 60000; // Only track once per minute
+
         const trackUserActivity = async () => {
+            const now = Date.now();
+            if (now - lastTrackTime < MIN_TRACK_INTERVAL) return; // Rate limit
+            lastTrackTime = now;
+            
             try {
                 googleSheetSync.setSettings(data.settings);
-                await googleSheetSync.setActiveUser(deviceId);
+                const result = await googleSheetSync.setActiveUser(deviceId);
+                console.log('📡 Activity tracked:', deviceId, 'Result:', result);
             } catch (error) {
                 console.warn('Activity tracking error:', error);
             }
         };
 
-        // Track immediately
-        trackUserActivity();
+        // Track IMMEDIATELY on mount (force first call)
+        setTimeout(() => trackUserActivity(), 1000);
 
         // Track every 2 minutes
         const interval = setInterval(trackUserActivity, 2 * 60 * 1000);
 
-        // Also track on user interaction (throttled)
+        // Track on user interaction
         let interactionTimeout;
         const handleInteraction = () => {
             clearTimeout(interactionTimeout);
-            interactionTimeout = setTimeout(trackUserActivity, 500); // Throttle to once every 500ms
+            interactionTimeout = setTimeout(trackUserActivity, 3000);
         };
-        window.addEventListener('click', handleInteraction);
-        window.addEventListener('keydown', handleInteraction);
+        window.addEventListener('click', handleInteraction, { passive: true });
+        window.addEventListener('keydown', handleInteraction, { passive: true });
 
         return () => {
             clearInterval(interval);
@@ -225,7 +259,7 @@ const App = () => {
             window.removeEventListener('click', handleInteraction);
             window.removeEventListener('keydown', handleInteraction);
         };
-    }, [data?.settings?.googleScriptUrl, deviceId]);
+    }, [data?.settings?.googleScriptUrl, deviceId, isAdmin, teacherSession]);
 
 
     const handleCloudPush = async () => {
@@ -242,22 +276,44 @@ const App = () => {
         setIsSyncing(false);
     };
 
+    // Sync lock to prevent concurrent syncs causing data multiplication
+    const [syncLock, setSyncLock] = useState(false);
+    const lastSyncRef = useRef(0);
+    const SYNC_COOLDOWN = 30000; // 30 seconds minimum between syncs
+
     // simplified helper for pushing all local changes
     const pushLocalToGoogle = useCallback(async (sheetData) => {
         if (!data?.settings?.googleScriptUrl) return;
-        console.log('📤 Syncing all local data to Google Sheet...');
-        
-        googleSheetSync.setSettings(data.settings);
-        const result = await googleSheetSync.syncAll(data);
-        
-        if (result.success) {
-            console.log('✅ Global sync complete');
-            return true;
-        } else {
-            console.warn('⚠ Global sync partially failed or action missing:', result.error);
+        if (syncLock) {
+            console.log('⏳ Sync blocked - another sync in progress');
             return false;
         }
-    }, [data, googleSheetSync]);
+        
+        const now = Date.now();
+        if (now - lastSyncRef.current < SYNC_COOLDOWN) {
+            console.log('⏳ Sync blocked - cooldown active');
+            return false;
+        }
+        
+        console.log('📤 Syncing all local data to Google Sheet...');
+        setSyncLock(true);
+        lastSyncRef.current = now;
+        
+        try {
+            googleSheetSync.setSettings(data.settings);
+            const result = await googleSheetSync.syncAll(data);
+            
+            if (result.success) {
+                console.log('✅ Global sync complete');
+                return true;
+            } else {
+                console.warn('⚠ Global sync partially failed or action missing:', result.error);
+                return false;
+            }
+        } finally {
+            setSyncLock(false);
+        }
+    }, [data, googleSheetSync, syncLock]);
 
     const handleGoogleSync = useCallback(async () => {
         if (!data.settings.googleScriptUrl) {
@@ -265,8 +321,22 @@ const App = () => {
             return;
         }
         
+        // Prevent concurrent syncs
+        if (isGoogleSyncing) {
+            console.log('⏳ Google sync already in progress, skipping...');
+            return;
+        }
+        
+        // Check cooldown
+        const now = Date.now();
+        if (now - lastSyncRef.current < SYNC_COOLDOWN) {
+            alert('Please wait a moment before syncing again.');
+            return;
+        }
+        
         setIsGoogleSyncing(true);
         setGoogleSyncStatus('Syncing with Google Sheet...');
+        lastSyncRef.current = now;
         
         googleSheetSync.setSettings(data.settings);
         
@@ -340,16 +410,78 @@ const App = () => {
         return () => window.removeEventListener('online', onOnline);
     }, [data.settings?.googleScriptUrl, handleGoogleSync]);
 
-    // periodic sync every 2 minutes for "instant" feel
+    // periodic sync every 3 minutes with proper lock check
     useEffect(() => {
         if (!data.settings?.googleScriptUrl) return;
-        const interval = setInterval(() => {
-            if (navigator.onLine && !isGoogleSyncing) {
+        
+        let syncTimeout;
+        const trySync = () => {
+            const now = Date.now();
+            if (navigator.onLine && !isGoogleSyncing && (now - lastSyncRef.current >= SYNC_COOLDOWN)) {
                 handleGoogleSync();
             }
-        }, 2 * 60 * 1000); // 2 minutes
-        return () => clearInterval(interval);
+            syncTimeout = setTimeout(trySync, 3 * 60 * 1000);
+        };
+        
+        syncTimeout = setTimeout(trySync, 3 * 60 * 1000);
+        return () => clearTimeout(syncTimeout);
     }, [data.settings?.googleScriptUrl, handleGoogleSync, isGoogleSyncing]);
+
+    // FAST SYNC: Push all local data to Google within 30 seconds
+    const performFastInitialSync = useCallback(async () => {
+        if (!data?.settings?.googleScriptUrl) return;
+        
+        console.log('⚡ Starting fast initial sync...');
+        setGoogleSyncStatus('Syncing to Google...');
+        googleSheetSync.setSettings(data.settings);
+        
+        try {
+            // Immediately push ALL local data to Google first
+            const pushResult = await googleSheetSync.syncAll(data);
+            console.log('⚡ Push result:', pushResult);
+            
+            // Small delay then fetch fresh data from Google
+            await new Promise(r => setTimeout(r, 500));
+            
+            // Fetch the latest from Google (now includes our data)
+            const result = await googleSheetSync.fetchAll();
+            
+            if (result.success) {
+                const merged = Storage.replaceWithGoogleData(data, {
+                    students: result.students || [],
+                    assessments: result.assessments || [],
+                    attendance: result.attendance || [],
+                    payments: result.payments || [],
+                    teachers: result.teachers || [],
+                    staff: result.staff || []
+                });
+                
+                setData(merged);
+                setGoogleSyncStatus(`✓ Synced! ${merged.students?.length || 0} students online`);
+                console.log('⚡ Fast sync complete:', merged.students?.length, 'students');
+                
+                // Clear status after 3 seconds
+                setTimeout(() => setGoogleSyncStatus(''), 3000);
+                return true;
+            }
+        } catch (error) {
+            console.error('⚡ Fast sync error:', error);
+            setGoogleSyncStatus('');
+        }
+        return false;
+    }, [data, googleSheetSync, setData]);
+
+    // Trigger fast sync within 30 seconds of connection
+    useEffect(() => {
+        if (!data || !data.settings?.googleScriptUrl) return;
+        
+        // Run fast sync within 5 seconds
+        const fastSyncTimer = setTimeout(() => {
+            performFastInitialSync();
+        }, 5000);
+        
+        return () => clearTimeout(fastSyncTimer);
+    }, [data?.settings?.googleScriptUrl, performFastInitialSync]);
 
     // Auto-sync on app load if Google Sheet configured
     useEffect(() => {
@@ -421,25 +553,39 @@ const App = () => {
 
     // Report user activity to Google Sheet for "Active Users" visibility
     useEffect(() => {
-        if (!data.settings.googleScriptUrl) return;
+        if (!data.settings.googleScriptUrl || !deviceId) return;
+        if (deviceId.includes('guest')) return;
         
-        let userId = '';
-        if (isAdmin) {
-            userId = `admin@${localStorage.getItem('et_login_username') || 'Administrator'}`;
-        } else if (teacherSession) {
-            userId = `teacher@${teacherSession.name || teacherSession.username}`;
-        }
-        
+        console.log('📡 App activity useEffect triggered for:', deviceId);
         googleSheetSync.setSettings(data.settings);
-        googleSheetSync.setCurrentUser(userId);
-
-        // Keep session alive periodically
-        const interval = setInterval(() => {
-            if (userId) googleSheetSync.setActiveUser(userId);
-        }, 60000);
         
-        return () => clearInterval(interval);
-    }, [isAdmin, teacherSession, data.settings.googleScriptUrl]);
+        // Report activity immediately and frequently
+        const reportActivity = () => {
+            console.log('📡 Sending activity update:', deviceId);
+            googleSheetSync.setActiveUser(deviceId).then(result => {
+                console.log('📡 Activity result:', result);
+            });
+        };
+        
+        // Initial report - immediate
+        setTimeout(reportActivity, 1000);
+        
+        // Keep session alive every 15 seconds (more frequent)
+        const interval = setInterval(reportActivity, 15000);
+        
+        // Also report on any user interaction
+        const handleInteraction = () => {
+            setTimeout(reportActivity, 500);
+        };
+        window.addEventListener('click', handleInteraction, { passive: true });
+        window.addEventListener('keydown', handleInteraction, { passive: true });
+        
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('click', handleInteraction);
+            window.removeEventListener('keydown', handleInteraction);
+        };
+    }, [deviceId, data.settings.googleScriptUrl, isAdmin, teacherSession]);
 
     const handleLogin = (e) => {
         e.preventDefault();
@@ -461,6 +607,10 @@ const App = () => {
     };
 
     const handleLogout = () => {
+        // Create new session ID for next login
+        const newSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem('et_session_id', newSessionId);
+        
         setIsAdmin(false);
         setLoginUsername('');
         localStorage.removeItem('et_is_admin');
@@ -472,6 +622,9 @@ const App = () => {
             setTeacherSession(null);
             localStorage.removeItem('et_teacher_session');
         }
+        
+        // Dispatch logout event
+        window.dispatchEvent(new Event('edutrack:logout'));
         
         setView('dashboard');
     };
@@ -629,7 +782,7 @@ const App = () => {
             case 'students': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="students" /></div>
-                    <${Students} data=${data} setData=${setData} onSelectStudent=${(id) => navigate('student-detail', { studentId: id })} isAdmin=${isAdmin} teacherSession=${teacherSession} />
+                    <${Students} data=${data} setData=${setData} onSelectStudent=${(id) => navigate('student-detail', { studentId: id })} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedReligion=${allowedTeacherReligion} />
                 </div>
             `;
             case 'teachers': return html`<${Teachers} data=${data} setData=${setData} />`;
@@ -637,11 +790,11 @@ const App = () => {
             case 'marklist': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="assessments" /></div>
-                    <${Marklist} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
+                <${Marklist} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} allowedReligion=${allowedTeacherReligion} />
                 </div>
             `;
             case 'assessments': return html`
-                <${Assessments} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
+                <${Assessments} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} allowedReligion=${allowedTeacherReligion} />
             `;
             case 'attendance': return html`
                 <${Attendance} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedGrades=${allowedTeacherGrades} />
@@ -656,7 +809,7 @@ const App = () => {
             case 'result-analysis': return html`
                 <div class="space-y-4">
                     <div class="flex justify-end"><${AcademicTransferUI} type="academic-full" /></div>
-                    <${ResultAnalysis} data=${data} onSelectStudent=${handleAcademicPrintSelect} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} />
+                    <${ResultAnalysis} data=${data} onSelectStudent=${handleAcademicPrintSelect} isAdmin=${isAdmin} teacherSession=${teacherSession} allowedSubjects=${allowedTeacherSubjects} allowedGrades=${allowedTeacherGrades} allowedReligion=${allowedTeacherReligion} />
                 </div>
             `;
             case 'fees': return html`<${Fees} data=${data} setData=${setData} isAdmin=${isAdmin} teacherSession=${teacherSession} />`;
@@ -822,6 +975,23 @@ const App = () => {
                     >
                         <span class=${isGoogleSyncing ? 'animate-spin' : ''}>${isGoogleSyncing ? '⏳' : '📥'}</span>
                         <span class="hidden sm:inline">${googleSyncStatus || 'Get from Sheet'}</span>
+                    </button>
+                    
+                    <button 
+                        onClick=${() => {
+                            if (!data.settings.googleScriptUrl) {
+                                alert("Google Sheet not configured.");
+                                return;
+                            }
+                            // Force immediate sync without cooldown
+                            lastSyncRef.current = 0;
+                            handleGoogleSync();
+                        }}
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all border bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100"
+                        title="Instant sync - pushes all local data to Google immediately"
+                    >
+                        <span>⚡</span>
+                        <span class="hidden sm:inline">Fast Sync</span>
                     </button>
 
                     <div class="h-8 w-px bg-slate-100 mx-1 hidden sm:block"></div>
