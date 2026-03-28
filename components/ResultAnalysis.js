@@ -364,7 +364,7 @@ export const ResultAnalysis = ({ data, onSelectStudent, isAdmin, teacherSession,
             </div>
 
             <!-- Analysis Table Sub-Header (page break before detailed table) -->
-            <div class="print-only page-break mb-4 text-center">
+            <div class="print-only mb-4 text-center">
                 <h2 class="text-sm font-bold uppercase text-slate-600">Detailed Student Score Table — ${filterGrade} | ${filterTerm === 'FULL' ? 'Full Year' : filterTerm} (${filterYear})</h2>
             </div>
 

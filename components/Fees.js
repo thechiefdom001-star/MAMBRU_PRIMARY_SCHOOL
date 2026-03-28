@@ -28,9 +28,16 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
 
     const streams = (data && data.settings && data.settings.streams) || [];
 
-    // Track activity helper
+    // Track activity helper - WITH DEDUPLICATION
     const trackActivity = async (action, payment, studentName = '') => {
         if (!data.settings?.googleScriptUrl) return;
+        
+        // Prevent duplicate tracking
+        const now = Date.now();
+        if (trackActivity.lastCall && now - trackActivity.lastCall < 3000) {
+            return;
+        }
+        trackActivity.lastCall = now;
         
         try {
             googleSheetSync.setSettings(data.settings);
@@ -39,9 +46,7 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
                 action === 'VOID' ? 'Fees' : 'Payments',
                 payment.id,
                 studentName || 'Unknown',
-                `KES ${payment.amount.toLocaleString()} - ${payment.term} | Receipt: ${payment.receiptNo}`,
-                null,
-                payment
+                `KES ${payment.amount.toLocaleString()} - ${payment.term} | Receipt: ${payment.receiptNo}`
             );
         } catch (err) {
             console.warn('Activity tracking failed:', err.message);
@@ -173,9 +178,6 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
             receiptNo: 'RCP-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0')
         };
 
-        // Track activity
-        trackActivity('ADD', newPayment, student.name);
-
         const financials = Storage.getStudentFinancials(student, data.payments, data.settings);
         const balanceAfter = financials.balance - totalAmount;
 
@@ -197,6 +199,7 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
             
             googleSheetSync.pushPayment(newPayment).then(res => {
                 if (res.success) {
+                    trackActivity('ADD', newPayment, student.name);
                     setSyncStatus('✓ Payment saved & synced');
                     console.log('✓ Payment synced to Google:', newPayment.id);
                 } else {
@@ -336,9 +339,6 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
 
         if (!confirm(confirmMsg)) return;
 
-        // Track activity before voiding
-        trackActivity('VOID', payment, student?.name || 'Unknown');
-
         // Mark payment as void instead of deleting
         const updatedPayments = data.payments.map(p => {
             if (p.id === paymentId) {
@@ -359,7 +359,10 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
             const voidedPayment = updatedPayments.find(p => p.id === paymentId);
             
             googleSheetSync.pushPayment(voidedPayment).then(res => {
-                if (res.success) setSyncStatus('✓ Payment voided & synced');
+                if (res.success) {
+                    trackActivity('VOID', voidedPayment, student?.name || 'Unknown');
+                    setSyncStatus('✓ Payment voided & synced');
+                }
                 else setSyncStatus('⚠ Voided locally (sync pending)');
                 setTimeout(() => setSyncStatus(''), 3000);
             }).catch(err => {
@@ -405,17 +408,11 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
     };
 
     const handlePrintReceipt = (orientation = 'portrait') => {
-        document.body.classList.remove('portrait-mode', 'landscape-mode');
-        document.body.classList.add('print-receipt-only', `${orientation}-mode`);
-        window.print();
-        setTimeout(() => document.body.classList.remove('print-receipt-only', 'portrait-mode', 'landscape-mode'), 500);
+        PrintService.print(orientation, ['print-receipt-only']);
     };
 
     const handlePrintTable = (orientation = 'portrait') => {
-        document.body.classList.remove('portrait-mode', 'landscape-mode');
-        document.body.classList.add('print-table-only', `${orientation}-mode`);
-        window.print();
-        setTimeout(() => document.body.classList.remove('print-table-only', 'portrait-mode', 'landscape-mode'), 500);
+        PrintService.print(orientation, ['print-table-only']);
     };
 
     return html`

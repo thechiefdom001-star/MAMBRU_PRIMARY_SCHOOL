@@ -126,6 +126,22 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
             setSelectedSubject('');
         }
     }, [selectedGrade, subjects]);
+
+    useEffect(() => {
+        const academicYear = data.settings?.academicYear || '2025/2026';
+        const matchingAssessments = (data.assessments || []).filter(a =>
+            a.grade === selectedGrade &&
+            a.subject === selectedSubject &&
+            a.term === selectedTerm &&
+            a.examType === selectedExamType &&
+            a.academicYear === academicYear
+        );
+
+        const storedMaxScore = matchingAssessments.find(a => Number(a.maxScore) > 0)?.maxScore;
+        if (storedMaxScore && Number(storedMaxScore) !== Number(examTotal)) {
+            setExamTotal(Number(storedMaxScore));
+        }
+    }, [data.assessments, data.settings?.academicYear, examTotal, selectedExamType, selectedGrade, selectedSubject, selectedTerm]);
     
     const filteredStudents = (data?.students || []).filter(s => {
         // Case-insensitive grade matching
@@ -140,7 +156,7 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
             (s.admissionNo && s.admissionNo.toLowerCase().includes(searchTerm.toLowerCase()));
         if (!matchesSearch) return false;
 
-        const matchesReligion = !allowedReligion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
+        const matchesReligion = !allowedReligion || !s.religion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
         if (!matchesReligion) return false;
         
         // For Senior School, filter students by their chosen electives
@@ -399,13 +415,23 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                     // Normalize the remote assessment
                     const normalizedRemote = {
                         ...remote,
+                        score: Number(remote.score),
+                        rawScore: remote.rawScore !== undefined && remote.rawScore !== '' ? Number(remote.rawScore) : undefined,
+                        maxScore: remote.maxScore !== undefined && remote.maxScore !== '' ? Number(remote.maxScore) : 100,
                         studentId: String(remote.studentId || ''),
                         studentAdmissionNo: remote.studentAdmissionNo || '',
                         studentName: remote.studentName || ''
                     };
+
+                    if (!Number.isFinite(normalizedRemote.score)) {
+                        return;
+                    }
+                    if (!Number.isFinite(normalizedRemote.rawScore) && Number.isFinite(normalizedRemote.score)) {
+                        normalizedRemote.rawScore = Math.round((normalizedRemote.score / 100) * normalizedRemote.maxScore);
+                    }
                     
                     // Check if this assessment already exists locally
-                    const exists = mergedAssessments.some(a => 
+                    const existingIndex = mergedAssessments.findIndex(a => 
                         a.id === normalizedRemote.id ||
                         // Match by composite key with flexible ID matching
                         ((
@@ -418,55 +444,60 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                          a.examType === normalizedRemote.examType &&
                          a.academicYear === normalizedRemote.academicYear)
                     );
-                    if (!exists) {
-                        // Try to match with local students using multiple strategies
-                        let matchedStudent = null;
-                        
-                        // Strategy 1: Match by studentId
-                        if (normalizedRemote.studentId) {
-                            matchedStudent = localStudents.find(s => 
-                                String(s.id) === normalizedRemote.studentId ||
-                                String(s.id) === String(Number(normalizedRemote.studentId))
-                            );
+                    
+                    // Try to match with local students using multiple strategies
+                    let matchedStudent = null;
+                    
+                    // Strategy 1: Match by studentId
+                    if (normalizedRemote.studentId) {
+                        matchedStudent = localStudents.find(s => 
+                            String(s.id) === normalizedRemote.studentId ||
+                            String(s.id) === String(Number(normalizedRemote.studentId))
+                        );
+                    }
+                    
+                    // Strategy 2: Match by admission number
+                    if (!matchedStudent && normalizedRemote.studentAdmissionNo) {
+                        matchedStudent = localStudents.find(s => 
+                            s.admissionNo && 
+                            String(s.admissionNo).toLowerCase() === normalizedRemote.studentAdmissionNo.toLowerCase()
+                        );
+                    }
+                    
+                    // Strategy 3: Match by name
+                    if (!matchedStudent && normalizedRemote.studentName) {
+                        matchedStudent = localStudents.find(s => 
+                            s.name && 
+                            s.name.toLowerCase().trim() === normalizedRemote.studentName.toLowerCase().trim()
+                        );
+                    }
+                    
+                    // Strategy 4: Match by grade + subject + term + exam (if studentId is empty but other data matches)
+                    if (!matchedStudent && !normalizedRemote.studentId && !normalizedRemote.studentAdmissionNo) {
+                        const existingByMatch = mergedAssessments.find(a =>
+                            a.subject === normalizedRemote.subject &&
+                            a.term === normalizedRemote.term &&
+                            a.examType === normalizedRemote.examType &&
+                            a.academicYear === normalizedRemote.academicYear
+                        );
+                        if (existingByMatch) {
+                            normalizedRemote.studentId = existingByMatch.studentId;
+                            normalizedRemote.studentAdmissionNo = existingByMatch.studentAdmissionNo || '';
                         }
-                        
-                        // Strategy 2: Match by admission number
-                        if (!matchedStudent && normalizedRemote.studentAdmissionNo) {
-                            matchedStudent = localStudents.find(s => 
-                                s.admissionNo && 
-                                String(s.admissionNo).toLowerCase() === normalizedRemote.studentAdmissionNo.toLowerCase()
-                            );
-                        }
-                        
-                        // Strategy 3: Match by name
-                        if (!matchedStudent && normalizedRemote.studentName) {
-                            matchedStudent = localStudents.find(s => 
-                                s.name && 
-                                s.name.toLowerCase().trim() === normalizedRemote.studentName.toLowerCase().trim()
-                            );
-                        }
-                        
-                        // Strategy 4: Match by grade + subject + term + exam (if studentId is empty but other data matches)
-                        if (!matchedStudent && !normalizedRemote.studentId && !normalizedRemote.studentAdmissionNo) {
-                            // Try to find by exact match on other fields
-                            const existingByMatch = mergedAssessments.find(a =>
-                                a.subject === normalizedRemote.subject &&
-                                a.term === normalizedRemote.term &&
-                                a.examType === normalizedRemote.examType &&
-                                a.academicYear === normalizedRemote.academicYear
-                            );
-                            if (existingByMatch) {
-                                normalizedRemote.studentId = existingByMatch.studentId;
-                                normalizedRemote.studentAdmissionNo = existingByMatch.studentAdmissionNo || '';
-                            }
-                        }
-                        
-                        mergedAssessments.push({
-                            ...normalizedRemote,
-                            studentId: matchedStudent?.id || normalizedRemote.studentId || '',
-                            studentAdmissionNo: matchedStudent?.admissionNo || normalizedRemote.studentAdmissionNo || '',
-                            studentName: matchedStudent?.name || normalizedRemote.studentName || 'Unknown'
-                        });
+                    }
+
+                    const mergedAssessment = {
+                        ...(existingIndex >= 0 ? mergedAssessments[existingIndex] : {}),
+                        ...normalizedRemote,
+                        studentId: matchedStudent?.id || normalizedRemote.studentId || '',
+                        studentAdmissionNo: matchedStudent?.admissionNo || normalizedRemote.studentAdmissionNo || '',
+                        studentName: matchedStudent?.name || normalizedRemote.studentName || 'Unknown'
+                    };
+
+                    if (existingIndex >= 0) {
+                        mergedAssessments[existingIndex] = mergedAssessment;
+                    } else {
+                        mergedAssessments.push(mergedAssessment);
                         addedCount++;
                     }
                 });
@@ -716,20 +747,27 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                     </div>
                 </div>
                 
-                <div class="assessments-container overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="bg-slate-50 border-b border-slate-200">
-                                <th class="px-4 py-2 text-left font-bold text-slate-600">Student Name</th>
-                                <th class="px-4 py-2 text-left font-bold text-slate-600">Subject</th>
-                                <th class="px-4 py-2 text-left font-bold text-slate-600">Term</th>
-                                <th class="px-4 py-2 text-left font-bold text-slate-600">Exam Type</th>
-                                <th class="px-4 py-2 text-center font-bold text-slate-600">Score</th>
-                                <th class="px-4 py-2 text-center font-bold text-slate-600">Level</th>
-                                <th class="px-4 py-2 text-center font-bold text-slate-600">Action</th>
+                <div class="print-only mb-6 flex flex-col items-center text-center">
+                    <img src="${data.settings.schoolLogo || ''}" class="w-16 h-16 mb-2 object-contain" alt="Logo" />
+                    <h1 class="text-2xl font-black uppercase">${data.settings.schoolName || 'School'}</h1>
+                    <h2 class="text-sm font-bold uppercase text-slate-500 mt-1">Assessment Records</h2>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase mt-1">${data.settings.academicYear || ''}</p>
+                </div>
+
+                <div class="assessments-container bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto no-scrollbar">
+                    <table class="w-full text-left min-w-[920px] assessment-records-table">
+                        <thead class="bg-slate-50 border-b border-slate-100">
+                            <tr>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Student Name</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Subject</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Term</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase">Exam Type</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase text-center">Score</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase text-center">Level</th>
+                                <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase text-center no-print">Action</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
+                        <tbody class="divide-y divide-slate-50">
                             ${data.assessments
                                 .filter(a => {
                                     if (!historySearchTerm) return true;
@@ -757,13 +795,16 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                                     .slice().reverse().map(assessment => {
                                         const student = findStudentForAssessment(assessment);
                                         return html`
-                                            <tr key=${assessment.id} class="hover:bg-blue-50">
-                                                <td class="px-4 py-3">${student?.name || assessment.studentName || 'Unknown'}</td>
-                                                <td class="px-4 py-3">${assessment.subject}</td>
-                                                <td class="px-4 py-3">${assessment.term}</td>
-                                                <td class="px-4 py-3">${assessment.examType}</td>
-                                                <td class="px-4 py-3 text-center font-bold">
-                                                    <div class="flex flex-col items-center">
+                                            <tr key=${assessment.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50">
+                                                <td class="px-6 py-4">
+                                                    <div class="font-bold text-sm text-slate-800">${student?.name || assessment.studentName || 'Unknown'}</div>
+                                                    <div class="text-[10px] text-slate-400 uppercase">${student?.admissionNo || assessment.studentAdmissionNo || '-'}</div>
+                                                </td>
+                                                <td class="px-6 py-4 text-slate-600 text-sm font-medium">${assessment.subject}</td>
+                                                <td class="px-6 py-4 text-slate-500 text-xs font-bold uppercase">${assessment.term}</td>
+                                                <td class="px-6 py-4 text-slate-500 text-xs font-bold uppercase">${assessment.examType}</td>
+                                                <td class="px-6 py-4 text-center font-bold">
+                                                    <div class="flex flex-col items-center gap-1">
                                                         <input 
                                                             type="number" 
                                                             min="0" 
@@ -788,21 +829,24 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                                                                     syncToGoogleSilent(updated).catch(() => {});
                                                                 }
                                                             }}
-                                                            class="w-12 p-1 text-center bg-white border border-slate-200 rounded outline-none focus:ring-2 focus:ring-blue-500"
+                                                            class="w-14 p-1.5 text-center bg-white border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 no-print font-bold text-sm"
                                                         />
+                                                        <span class="hidden print:block text-[11px] font-black text-slate-700">
+                                                            ${assessment.rawScore !== undefined ? assessment.rawScore : assessment.score}${assessment.maxScore ? ` / ${assessment.maxScore}` : ''}${assessment.score !== undefined ? ` (${assessment.score}%)` : ''}
+                                                        </span>
                                                         ${assessment.maxScore && assessment.maxScore != 100 && html`
-                                                            <span class="text-[9px] text-slate-400">/ ${assessment.maxScore} (${assessment.score}%)</span>
+                                                            <span class="text-[9px] text-slate-400 no-print">/ ${assessment.maxScore} (${assessment.score}%)</span>
                                                         `}
                                                     </div>
                                                 </td>
-                                                <td class="px-4 py-3 text-center">
-                                                    <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">${assessment.level}</span>
+                                                <td class="px-6 py-4 text-center">
+                                                    <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase">${assessment.level}</span>
                                                 </td>
-                                                <td class="px-4 py-3 text-center">
+                                                <td class="px-6 py-4 text-center no-print">
                                                     <button 
                                                         onClick=${() => deleteAssessment(assessment.id)}
                                                         title="Delete assessment"
-                                                        class="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded text-xs font-bold"
+                                                        class="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-[10px] font-bold uppercase"
                                                     >
                                                         Delete
                                                     </button>

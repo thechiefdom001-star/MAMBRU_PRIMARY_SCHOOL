@@ -54,6 +54,9 @@ export const Attendance = ({ data, setData, isAdmin, teacherSession, allowedGrad
     const streams = data?.settings?.streams || [];
 
     const students = (data?.students || []).filter(s => {
+        // Filter out students who have left the school
+        if (s.status === 'left') return false;
+        
         const inGrade = s.grade === selectedGrade;
         if (!inGrade) return false;
         

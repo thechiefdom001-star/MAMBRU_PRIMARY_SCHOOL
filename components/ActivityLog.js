@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
 
@@ -45,35 +45,59 @@ export const ActivityLog = ({ settings, isAdmin, teacherSession, limit = 20 }) =
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [stats, setStats] = useState(null);
+    const hasLoaded = useRef(false);
 
     useEffect(() => {
-        if (settings?.googleScriptUrl) {
+        // Only load once when settings become available
+        if (settings?.googleScriptUrl && !hasLoaded.current) {
+            hasLoaded.current = true;
             loadActivities();
             loadStats();
-        } else {
+        } else if (!settings?.googleScriptUrl) {
             setLoading(false);
         }
-    }, [settings]);
+    }, [settings?.googleScriptUrl]);
 
+    // Manual refresh only - no auto-refresh to prevent loops
     const loadActivities = async () => {
+        // Prevent rapid repeated calls
+        const now = Date.now();
+        if (loadActivities.lastCall && now - loadActivities.lastCall < 3000) {
+            console.log('[ActivityLog] Skipping refresh, too soon');
+            return;
+        }
+        loadActivities.lastCall = now;
+        
         setLoading(true);
         try {
             googleSheetSync.setSettings(settings);
+            console.log('[ActivityLog] Loading activities, URL:', settings?.googleScriptUrl);
             const data = await googleSheetSync.getRecentActivities(limit);
+            console.log('[ActivityLog] Received activities:', data?.length || 0, data);
             setActivities(data || []);
         } catch (error) {
-            console.warn('Failed to load activities:', error);
+            console.error('[ActivityLog] Failed to load activities:', error);
             setActivities([]);
         }
         setLoading(false);
     };
 
     const loadStats = async () => {
+        // Prevent rapid repeated calls
+        const now = Date.now();
+        if (loadStats.lastCall && now - loadStats.lastCall < 3000) {
+            return;
+        }
+        loadStats.lastCall = now;
+        
         try {
+            googleSheetSync.setSettings(settings);
+            console.log('[ActivityLog] Loading stats...');
             const summary = await googleSheetSync.getActivitySummary(7);
+            console.log('[ActivityLog] Received stats:', summary);
             setStats(summary);
         } catch (error) {
-            console.warn('Failed to load stats:', error);
+            console.error('[ActivityLog] Failed to load stats:', error);
         }
     };
 

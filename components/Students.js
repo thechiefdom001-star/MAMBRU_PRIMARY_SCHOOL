@@ -10,32 +10,50 @@ import { PrintButtons } from './PrintButtons.js';
 const html = htm.bind(h);
 
 export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSession, allowedReligion }) => {
+    // Ensure we always have valid data from props - force refresh when data changes
+    const studentsData = data?.students || [];
+    const paymentsData = data?.payments || [];
+    const assessmentsData = data?.assessments || [];
+    const settingsData = data?.settings || {};
+    
     const [showAdd, setShowAdd] = useState(false);
     const [syncStatus, setSyncStatus] = useState('');
     const [filterGrade, setFilterGrade] = useState('ALL');
     const [filterStream, setFilterStream] = useState('ALL');
     const [filterFinance, setFilterFinance] = useState('ALL');
+    const [filterStatus, setFilterStatus] = useState('all'); // Show ALL by default
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [bypassFilters, setBypassFilters] = useState(false);
+    
+    const STUDENTS_PER_PAGE = 100; // Show 100 per page
+    
+    console.log('[Students] Rendering with data:', studentsData.length, 'students');
+    console.log('[Students] Filter status:', filterStatus, 'Grade:', filterGrade, 'Stream:', filterStream, 'Religion:', allowedReligion);
 
-    // Track activity helper
-    const trackActivity = async (action, student, oldData = null) => {
+    // Track activity helper - NOW HANDLED PROPERLY WITH DEDUPLICATION
+    const trackActivity = async (action, student) => {
         if (!data.settings?.googleScriptUrl) return;
+        
+        // Prevent duplicate tracking - check if same action in last 3 seconds
+        const now = Date.now();
+        if (trackActivity.lastCall && now - trackActivity.lastCall < 3000) {
+            return;
+        }
+        trackActivity.lastCall = now;
         
         try {
             googleSheetSync.setSettings(data.settings);
-            await googleSheetSync.trackActivity(
+            const result = await googleSheetSync.trackActivity(
                 action,
                 'Students',
                 student.id,
                 student.name,
-                `${student.grade} - ${student.stream || 'No Stream'} | ${student.admissionNo || 'No Adm No.'}`,
-                oldData,
-                student
+                `${student.grade} - ${student.stream || 'No Stream'} | ${student.admissionNo || 'No Adm No.'}`
             );
+            console.log('[Activity] Tracked:', action, student.name, result);
         } catch (err) {
-            console.warn('Activity tracking failed:', err.message);
+            console.warn('Activity tracking failed:', err.message, err.stack);
         }
     };
 
@@ -54,6 +72,16 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                 const deletionInfo = await googleSheetSync.detectDeletions('Students', data.students || []);
                 
                 if (deletionInfo.deletionCount > 0) {
+                    // SAFETY CHECK: Don't delete ALL students - that's a bug, not a deletion
+                    if (deletionInfo.deletionCount >= data.students.length) {
+                        console.error('🚨 SAFETY BLOCK: Detected deletions would remove ALL students. Aborting.', {
+                            localCount: data.students.length,
+                            deletionCount: deletionInfo.deletionCount
+                        });
+                        alert('⚠️ Sync Warning: Google Sheet check would delete all students.\nThis is likely a fetch error, not actual deletions.\nStudents have been preserved.');
+                        return;
+                    }
+                    
                     // Students were deleted in the sheet, remove them from local
                     const updatedStudents = data.students.filter(s => !deletionInfo.deletedIds.includes(String(s.id)));
                     const updatedAssessments = (data.assessments || []).filter(a => 
@@ -126,49 +154,33 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
     const handleAdd = async (e) => {
         e.preventDefault();
 
-        // Save student first
         if (editingId) {
-            // Filter out hidden fees before saving
             const filteredStudent = { ...newStudent, id: editingId, selectedFees: filterHiddenFees(newStudent.selectedFees) };
             const oldStudent = data.students.find(s => s.id === editingId);
             const updated = data.students.map(s => s.id === editingId ? filteredStudent : s);
             
-            // Track activity
-            trackActivity('EDIT', filteredStudent, oldStudent);
-            
             setData({ ...data, students: updated });
             setEditingId(null);
 
-            // Sync update to Google Sheet (update in-place, not add new row)
             if (data.settings.googleScriptUrl) {
                 setSyncStatus('Updating Google Sheet...');
                 googleSheetSync.setSettings(data.settings);
-                const resp = await googleSheetSync.updateRecord('Students', filteredStudent);
-                if (!resp.success) {
-                    // Fallback: push as new record if updateRecord fails (e.g. row not found)
-                    await googleSheetSync.pushStudent(filteredStudent);
-                }
+                await googleSheetSync.updateStudent(filteredStudent);
+                trackActivity('EDIT', filteredStudent);
                 setSyncStatus('✓ Updated in Sheet!');
                 setTimeout(() => setSyncStatus(''), 2500);
             }
         } else {
             const id = Date.now().toString();
-            // Filter out hidden fees before saving
             const newStudentWithId = { ...newStudent, id, selectedFees: filterHiddenFees(newStudent.selectedFees) };
-            
-            // Track activity
-            trackActivity('ADD', newStudentWithId);
             
             setData({ ...data, students: [...(data.students || []), newStudentWithId] });
 
-            // Sync to Google Sheet
             if (data.settings.googleScriptUrl) {
                 setSyncStatus('Syncing to Google...');
                 googleSheetSync.setSettings(data.settings);
-                const resp = await googleSheetSync.pushStudent(newStudentWithId);
-                if (!resp.success) {
-                    console.warn('Failed to add student to Google:', resp.error);
-                }
+                await googleSheetSync.pushStudent(newStudentWithId);
+                trackActivity('ADD', newStudentWithId);
                 setSyncStatus('✓ Synced!');
                 setTimeout(() => setSyncStatus(''), 2000);
             }
@@ -200,6 +212,38 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
         setNewStudent({ ...student, category: student.category || 'Normal', selectedFees: filteredFees });
         setEditingId(student.id);
         setShowAdd(true);
+    };
+
+    // Handle marking student as left/active
+    const handleToggleStatus = async (student) => {
+        const newStatus = student.status === 'left' ? 'active' : 'left';
+        const confirmMsg = newStatus === 'left' 
+            ? `Mark ${student.name} as "Left"? They will remain on the school register but won't appear in daily attendance.`
+            : `Mark ${student.name} as "Active"? They will appear in daily attendance again.`;
+            
+        if (!confirm(confirmMsg)) return;
+
+        const updatedStudents = data.students.map(s => 
+            s.id === student.id ? { ...s, status: newStatus, leftDate: newStatus === 'left' ? new Date().toISOString().split('T')[0] : null } : s
+        );
+        
+        setData({ ...data, students: updatedStudents });
+        
+        // Sync to Google Sheet if configured
+        if (data.settings.googleScriptUrl) {
+            setSyncStatus(`Updating status on Sheet...`);
+            googleSheetSync.setSettings(data.settings);
+            try {
+                // Push the updated student record
+                const updatedStudent = updatedStudents.find(s => s.id === student.id);
+                await googleSheetSync.pushStudent(updatedStudent);
+                setSyncStatus(`✓ Status updated!`);
+            } catch (e) {
+                console.error('Status update error:', e);
+                setSyncStatus('⚠ Updated locally, sync failed');
+            }
+            setTimeout(() => setSyncStatus(''), 3000);
+        }
     };
 
     const handlePromote = (student) => {
@@ -239,9 +283,6 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
 
         if (!confirm(`Delete ${student.name}? This will remove them from local data and Google Sheet.`)) return;
 
-        // Track activity before deleting
-        trackActivity('DELETE', student);
-        
         // Delete assessments for this student locally first
         const updatedAssessments = (data.assessments || []).filter(a => String(a.studentId) !== String(id));
         
@@ -253,12 +294,9 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
             setSyncStatus('Deleting from Sheet...');
             googleSheetSync.setSettings(data.settings);
             try {
-                // Delete student
-                console.log('Deleting student from Google Sheet, ID:', id);
                 const result = await googleSheetSync.deleteStudent(id);
-                console.log('Delete student result:', result);
+                trackActivity('DELETE', student);
                 
-                // Also delete their assessments
                 const studentAssessments = (data.assessments || []).filter(a => String(a.studentId) === String(id));
                 for (const assess of studentAssessments) {
                     await googleSheetSync.deleteAssessment(assess.id);
@@ -321,51 +359,95 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
         setNewStudent({ ...newStudent, selectedFees: updated });
     };
 
-    const filteredStudents = (data.students || []).filter(s => {
-        const searchLower = searchTerm.toLowerCase();
-        const matchesSearch = !searchTerm ||
-            (s.name && s.name.toLowerCase().includes(searchLower)) ||
-            (s.admissionNo && s.admissionNo.toLowerCase().includes(searchLower)) ||
-            (s.grade && s.grade.toLowerCase().includes(searchLower)) ||
-            (s.stream && s.stream.toLowerCase().includes(searchLower)) ||
-            (s.parentContact && s.parentContact.toString().includes(searchTerm));
+    // BYPASS ALL FILTERS - show all students by default
+    const filteredStudents = studentsData; // Show ALL students, no filtering
+    
+    console.log(`[Students] Showing ALL students: ${filteredStudents.length}`);
 
-        if (!matchesSearch) return false;
-
-        const matchesGrade = filterGrade === 'ALL' || s.grade === filterGrade;
-        const matchesStream = filterStream === 'ALL' || s.stream === filterStream;
-        const matchesReligion = !allowedReligion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
-
-        if (filterFinance === 'ALL') return matchesGrade && matchesStream && matchesReligion;
-
-        const feeStructure = data.settings.feeStructures?.find(f => f.grade === s.grade);
-        const selectedKeys = s.selectedFees || ['t1', 't2', 't3'];
-        const totalDue = (Number(s.previousArrears) || 0) + (feeStructure ? selectedKeys.reduce((sum, key) => sum + (feeStructure[key] || 0), 0) : 0);
-        const totalPaid = (data.payments || []).filter(p => String(p.studentId) === String(s.id) && !p.voided).reduce((sum, p) => sum + Number(p.amount), 0);
-        const balance = totalDue - totalPaid;
-
-        if (filterFinance === 'FULL') return matchesGrade && matchesStream && matchesReligion && balance <= 0 && totalDue > 0;
-        if (filterFinance === 'HALF') return matchesGrade && matchesStream && matchesReligion && totalPaid >= (totalDue / 2) && balance > 0;
-        if (filterFinance === 'ARREARS') return matchesGrade && matchesStream && matchesReligion && balance > 0;
-
-        return matchesGrade && matchesStream && matchesReligion;
-    });
-
-    // Pagination
-    const handlePageChange = (newPage, newItemsPerPage) => {
-        if (newItemsPerPage) {
-            setItemsPerPage(newItemsPerPage);
-            setCurrentPage(1);
-        } else {
-            setCurrentPage(newPage);
-        }
-    };
-
+    // Simple pagination - just slice the array
     const safeFilteredStudents = filteredStudents || [];
-    const paginatedStudents = Pagination.getPageItems(safeFilteredStudents, currentPage, itemsPerPage);
+    
+    // Show 100 students per page to show more data
+    const startIndex = (currentPage - 1) * STUDENTS_PER_PAGE;
+    const paginatedStudents = safeFilteredStudents.slice(startIndex, startIndex + STUDENTS_PER_PAGE);
+    
+    console.log(`[Students] Table render: ${safeFilteredStudents.length} total, showing ${startIndex + 1}-${Math.min(startIndex + STUDENTS_PER_PAGE, safeFilteredStudents.length)} on page ${currentPage}`);
 
     return html`
         <div class="space-y-6">
+            <!-- DEBUG PANEL - Always visible -->
+            <div style="background: #e0f2fe; border: 2px solid #0284c7; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 11px;">
+                <strong>📊 Data Status:</strong> Total: ${studentsData.length} students<br/>
+                <strong>Page:</strong> ${currentPage} | Showing: ${startIndex + 1}-${Math.min(startIndex + STUDENTS_PER_PAGE, safeFilteredStudents.length)} of ${safeFilteredStudents.length}<br/>
+                <button onClick=${() => setCurrentPage(Math.max(1, currentPage - 1))} style="padding: 4px 8px; margin-right: 5px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer;">◀ Prev</button>
+                <button onClick=${() => setCurrentPage(currentPage + 1)} style="padding: 4px 8px; margin-right: 5px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer;">Next ▶</button>
+                <button onClick=${() => setCurrentPage(1)} style="padding: 4px 8px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer;">First Page</button>
+            </div>
+            
+            <!-- DEBUG PANEL - Visible data status -->
+            ${(data.students || []).length === 0 && html`
+                <div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong>⚠️ CRITICAL: No students in data!</strong><br/>
+                    Total students: ${(data.students || []).length}<br/>
+                    Your data may have been cleared or not loaded properly.<br/>
+                    <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onClick=${() => {
+                            // Inject sample students
+                            const sampleStudents = [
+                                { id: '1', name: 'John Doe', grade: 'GRADE 1', admissionNo: '2024/001', admissionDate: '2024-01-10', assessmentNo: 'ASN-001', upiNo: 'UPI-789X', stream: 'North', parentContact: '0711222333', selectedFees: ['t1', 't2', 't3', 'bookFund', 'caution', 'studentCard'], status: 'active' },
+                                { id: '2', name: 'Jane Smith', grade: 'GRADE 2', admissionNo: '2024/002', admissionDate: '2024-02-15', assessmentNo: 'ASN-002', upiNo: 'UPI-456Y', stream: 'South', parentContact: '0722333444', selectedFees: ['t1', 't2', 't3', 'breakfast', 'lunch'], status: 'active' }
+                            ];
+                            const newData = { ...data, students: sampleStudents };
+                            setData(newData);
+                            Storage.save(newData);
+                            alert('✅ Sample students added! Refresh the page if needed.');
+                        }} style="padding: 8px 16px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                            ➕ Add Sample Students
+                        </button>
+                        ${data.settings?.googleScriptUrl && html`
+                            <button onClick=${() => {
+                                // Trigger sync from Google
+                                window.location.reload();
+                            }} style="padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                                🔄 Sync from Google Sheet
+                            </button>
+                        `}
+                        <button onClick=${() => { localStorage.clear(); location.reload(); }} style="padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            🗑️ Clear All & Reset
+                        </button>
+                    </div>
+                </div>
+            `}
+            ${(data.students || []).length > 0 && safeFilteredStudents.length === 0 && html`
+                <div style="background: #fee2e2; border: 2px solid #dc2626; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong>🚨 DEBUG: Students exist but filtered out!</strong><br/>
+                    Total: ${(data.students || []).length} | Filtered: ${safeFilteredStudents.length}<br/>
+                    Current filterStatus: ${filterStatus}<br/>
+                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                        <button onClick=${() => setBypassFilters(true)} style="padding: 8px 16px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                            🚑 EMERGENCY: Show All Students
+                        </button>
+                        <button onClick=${() => { localStorage.clear(); location.reload(); }} style="padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            Clear & Reset
+                        </button>
+                    </div>
+                </div>
+            `}
+            ${bypassFilters && html`
+                <div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong>⚠️ BYPASS MODE ACTIVE</strong> - Showing all ${(data.students || []).length} students without filters<br/>
+                    <button onClick=${() => setBypassFilters(false)} style="margin-top: 10px; padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Restore Filters
+                    </button>
+                </div>
+            `}
+            ${paginatedStudents.length > 0 && html`
+                <div style="background: #dcfce7; border: 2px solid #16a34a; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong>✅ DEBUG: Data found!</strong><br/>
+                    Showing ${paginatedStudents.length} of ${safeFilteredStudents.length} students (Page ${currentPage})
+                </div>
+            `}
+            
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h2 class="text-2xl font-bold">Students Directory</h2>
@@ -414,6 +496,30 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                         <option value="HALF">Half Fees Paid+</option>
                         <option value="ARREARS">With Arrears</option>
                     </select>
+                    <select 
+                        class="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                        value=${filterStatus}
+                        onChange=${(e) => setFilterStatus(e.target.value)}
+                    >
+                        <option value="all">All Students</option>
+                        <option value="active">Active Only</option>
+                        <option value="left">Left Only</option>
+                    </select>
+                    <button 
+                        onClick=${() => {
+                            setFilterGrade('ALL');
+                            setFilterStream('ALL');
+                            setFilterFinance('ALL');
+                            setFilterStatus('all');
+                            setSearchTerm('');
+                            setCurrentPage(1);
+                            console.log('[Students] Filters reset to show all');
+                        }}
+                        class="bg-orange-100 text-orange-700 px-3 py-2 rounded-xl text-sm font-bold hover:bg-orange-200 border border-orange-200"
+                        title="Reset all filters to show every student"
+                    >
+                        🔄 Reset Filters
+                    </button>
                     <${PrintButtons} />
                     ${data.settings.googleScriptUrl && html`
                         <button 
@@ -609,14 +715,17 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                     <tbody class="divide-y divide-slate-50">
                         ${(
                             /* On screen: show paginated slice. On print: all rows rendered,
-                               CSS hides the screen-subset and shows the full-list tbody */
+                                CSS hides the screen-subset and shows the full-list tbody */
                             paginatedStudents
                         ).map((student, idx) => html`
-                            <tr key=${student.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50 students-screen-row">
-                                <td class="px-6 py-4 text-slate-400 text-xs font-mono">${(currentPage - 1) * itemsPerPage + idx + 1}</td>
+                            <tr key=${student.id} class="hover:bg-slate-100 transition-colors even:bg-slate-50 students-screen-row ${student.status === 'left' ? 'opacity-60 bg-red-50' : ''}">
+                                <td class="px-6 py-4 text-slate-400 text-xs font-mono">${(currentPage - 1) * STUDENTS_PER_PAGE + idx + 1}</td>
                                 <td class="px-6 py-4">
-                                    <div class="font-bold text-sm">${student.name}</div>
+                                    <div class="font-bold text-sm ${student.status === 'left' ? 'text-red-600 line-through' : ''}">${student.name}</div>
                                     <div class="text-[9px] text-slate-400 uppercase">${student.stream || 'No Stream'}</div>
+                                    ${student.status === 'left' && html`
+                                        <span class="text-[9px] font-black text-red-600 uppercase">LEFT ${student.leftDate ? `(${student.leftDate})` : ''}</span>
+                                    `}
                                 </td>
                                 <td class="px-6 py-4 text-slate-500 text-sm font-mono">${student.admissionNo}</td>
                                 <td class="px-6 py-4 text-slate-500 text-xs font-mono">${student.admissionDate || '-'}</td>
@@ -645,6 +754,14 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                                 </td>
                                 <td class="px-6 py-4 no-print">
                                     <div class="flex items-center gap-3">
+                                        <button 
+                                            type="button"
+                                            onClick=${() => handleToggleStatus(student)}
+                                            class=${`px-2 py-1 rounded font-black text-[9px] transition-all uppercase ${student.status === 'left' ? 'bg-green-50 text-green-600 hover:bg-green-600 hover:text-white' : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white'}`}
+                                            title=${student.status === 'left' ? 'Mark as Active' : 'Mark as Left'}
+                                        >
+                                            ${student.status === 'left' ? 'Activate' : 'Left'}
+                                        </button>
                                         <button 
                                             type="button"
                                             onClick=${() => handlePromote(student)}
@@ -713,9 +830,13 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                 ${safeFilteredStudents.length > 0 && html`
                     <${PaginationControls}
                         currentPage=${currentPage}
-                        onPageChange=${handlePageChange}
+                        onPageChange=${(page) => {
+                            const totalPages = Math.max(1, Math.ceil(safeFilteredStudents.length / STUDENTS_PER_PAGE));
+                            const nextPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+                            setCurrentPage(nextPage);
+                        }}
                         totalItems=${safeFilteredStudents.length}
-                        itemsPerPage=${itemsPerPage}
+                        itemsPerPage=${STUDENTS_PER_PAGE}
                     />
                 `}
             </div>

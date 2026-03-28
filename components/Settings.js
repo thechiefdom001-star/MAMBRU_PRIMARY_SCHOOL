@@ -200,10 +200,13 @@ export const Settings = ({ data, setData }) => {
 
         if (importSelections.settings) {
             newData.settings = { 
+                ...newData.settings, // Keep current settings first
                 ...pendingImportData.settings,
-                // Keep logo if not provided in import
-                schoolLogo: pendingImportData.settings?.schoolLogo || settings.schoolLogo
+                // Preserve critical fields that shouldn't be lost
+                schoolLogo: pendingImportData.settings?.schoolLogo || settings.schoolLogo,
+                googleScriptUrl: newData.settings?.googleScriptUrl // KEEP EXISTING URL!
             };
+            console.log('[Import] Settings merged, URL preserved:', newData.settings?.googleScriptUrl);
         }
         // Note: Settings are usually required, so we don't clear them if unchecked
 
@@ -222,9 +225,14 @@ export const Settings = ({ data, setData }) => {
         }
 
         setData(newData);
+        
+        // Explicitly save to localStorage immediately to ensure data persists
+        Storage.save(newData);
+        console.log('[Import] Saved to localStorage:', newData.students?.length, 'students');
+        
         setShowImportModal(false);
         setPendingImportData(null);
-        alert('Data integration complete! Selected categories have been updated.');
+        alert('Data integration complete! ' + (newData.students?.length || 0) + ' students saved locally.\n\nUse "Force Push" button to send to Google Sheet.');
     };
 
     return html`
@@ -315,6 +323,99 @@ export const Settings = ({ data, setData }) => {
                                     class="block w-full text-[10px] text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
                                 />
                             </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                    <h3 class="font-bold mb-4 flex items-center gap-2">
+                        <span class="w-4 h-4 bg-green-500 rounded text-white flex items-center justify-center text-[10px]">G</span>
+                        Google Sheet Sync Configuration
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="p-4 border border-slate-100 rounded-xl bg-slate-50">
+                            <label class="text-xs font-black uppercase text-slate-500 mb-2 block">Google Apps Script URL</label>
+                            <p class="text-[10px] text-slate-500 mb-3">
+                                Enter your Google Apps Script Web App URL to enable data synchronization with Google Sheets.
+                                <a href="https://script.google.com" target="_blank" class="text-blue-600 hover:underline">Create a new script</a> and deploy as web app.
+                            </p>
+                            <input 
+                                type="url"
+                                class="w-full p-3 bg-white rounded-xl outline-none border border-slate-200 focus:border-green-500 text-xs font-mono"
+                                placeholder="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+                                value=${settings.googleScriptUrl || ''}
+                                onChange=${(e) => {
+                                    const url = e.target.value.trim();
+                                    setData({
+                                        ...data,
+                                        settings: { ...settings, googleScriptUrl: url }
+                                    });
+                                }}
+                            />
+                            ${settings.googleScriptUrl && html`
+                                <div class="mt-2 flex items-center gap-2">
+                                    <span class="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded font-bold">✓ Configured</span>
+                                    <button 
+                                        onClick=${() => {
+                                            // Test the connection
+                                            const testConnection = async () => {
+                                                const { googleSheetSync } = await import('../lib/googleSheetSync.js');
+                                                googleSheetSync.setSettings(settings);
+                                                try {
+                                                    const result = await googleSheetSync.fetchAll();
+                                                    if (result.success) {
+                                                        alert(`✅ Connection successful!\nStudents: ${result.students?.length || 0}\nAssessments: ${result.assessments?.length || 0}`);
+                                                    } else {
+                                                        alert('❌ Connection failed: ' + result.error);
+                                                    }
+                                                } catch (err) {
+                                                    alert('❌ Connection error: ' + err.message);
+                                                }
+                                            };
+                                            testConnection();
+                                        }}
+                                        class="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold hover:bg-blue-200"
+                                    >
+                                        Test Connection
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="p-4 border border-slate-100 rounded-xl bg-slate-50">
+                                <h4 class="text-xs font-black uppercase text-slate-400 mb-2">How to Setup</h4>
+                                <ol class="text-[10px] text-slate-500 space-y-1 list-decimal list-inside">
+                                    <li>Open <a href="https://script.google.com" target="_blank" class="text-blue-600 hover:underline">Google Apps Script</a></li>
+                                    <li>Create a new project</li>
+                                    <li>Copy the code from <code>google-apps-script.gs</code> file</li>
+                                    <li>Click Deploy → New deployment</li>
+                                    <li>Select "Web app" and set "Anyone" access</li>
+                                    <li>Copy the Web App URL and paste above</li>
+                                </ol>
+                            </div>
+                            <div class="p-4 border border-slate-100 rounded-xl bg-slate-50">
+                                <h4 class="text-xs font-black uppercase text-slate-400 mb-2">Sync Status</h4>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between text-[10px]">
+                                        <span class="text-slate-500">Local Students:</span>
+                                        <span class="font-bold">${data.students?.length || 0}</span>
+                                    </div>
+                                    <div class="flex justify-between text-[10px]">
+                                        <span class="text-slate-500">Local Assessments:</span>
+                                        <span class="font-bold">${data.assessments?.length || 0}</span>
+                                    </div>
+                                    <div class="flex justify-between text-[10px]">
+                                        <span class="text-slate-500">Google URL:</span>
+                                        <span class="font-bold ${settings.googleScriptUrl ? 'text-green-600' : 'text-red-500'}">
+                                            ${settings.googleScriptUrl ? 'Set' : 'Not Set'}
+                                        </span>
+                                    </div>
+                                    <div class="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-[10px] text-yellow-800">
+                                        <strong>Note:</strong> Auto-sync is disabled. Use Force Push to send local data to Google, or use manual Sync button to pull from Google.
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

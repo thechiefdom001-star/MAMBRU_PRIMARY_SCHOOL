@@ -5,7 +5,37 @@ import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
-export const TeacherAuth = ({ settings, onLogin, onClose }) => {
+const normalizeList = (value) => {
+    if (!value) return '';
+
+    const seen = new Set();
+    return String(value)
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => {
+            const normalized = item.toLowerCase();
+            if (!normalized || seen.has(normalized)) return false;
+            seen.add(normalized);
+            return true;
+        })
+        .join(', ');
+};
+
+const buildTeacherSyncPayload = (teacher) => ({
+    id: teacher.id,
+    name: teacher.name || '',
+    contact: teacher.contact || '',
+    subjects: teacher.subjects || '',
+    grades: teacher.grades || '',
+    employeeNo: teacher.employeeNo || '',
+    nssfNo: teacher.nssfNo || '',
+    shifNo: teacher.shifNo || '',
+    taxNo: teacher.taxNo || '',
+    isClassTeacher: !!teacher.isClassTeacher,
+    classTeacherGrade: teacher.classTeacherGrade || ''
+});
+
+export const TeacherAuth = ({ settings, data = {}, setData = () => {}, onLogin, onClose }) => {
     const [mode, setMode] = useState('login');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -64,6 +94,92 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
         }
     }, [settings]);
 
+    const buildTeacherProfile = (teacherSeed = {}) => {
+        const normalizedUsername = (teacherSeed.username || '').trim().toLowerCase();
+        const normalizedName = (teacherSeed.name || teacherSeed.username || '').trim();
+        const normalizedSubjects = normalizeList(teacherSeed.subjects);
+        const normalizedGrades = normalizeList(teacherSeed.grades);
+        const normalizedClassTeacherGrade = (teacherSeed.classTeacherGrade || '').trim();
+        const normalizedReligion = (teacherSeed.religion || '').trim();
+        const normalizedRole = (teacherSeed.role || 'teacher').trim();
+        const currentTeachers = Array.isArray(data.teachers) ? data.teachers : [];
+
+        const existingTeacher = currentTeachers.find(teacher => {
+            const teacherUsername = (teacher.username || '').trim().toLowerCase();
+            const teacherName = (teacher.name || '').trim().toLowerCase();
+
+            return (
+                (normalizedUsername && teacherUsername === normalizedUsername) ||
+                (normalizedName && teacherName === normalizedName.toLowerCase())
+            );
+        });
+
+        return {
+            id: existingTeacher?.id || teacherSeed.teacherId || `T-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            username: normalizedUsername || existingTeacher?.username || '',
+            name: normalizedName || existingTeacher?.name || '',
+            contact: existingTeacher?.contact || '',
+            subjects: normalizedSubjects || existingTeacher?.subjects || '',
+            grades: normalizedGrades || existingTeacher?.grades || '',
+            employeeNo: existingTeacher?.employeeNo || '',
+            nssfNo: existingTeacher?.nssfNo || '',
+            shifNo: existingTeacher?.shifNo || '',
+            taxNo: existingTeacher?.taxNo || '',
+            isClassTeacher: normalizedRole === 'class_teacher',
+            classTeacherGrade: normalizedClassTeacherGrade || existingTeacher?.classTeacherGrade || '',
+            role: normalizedRole || existingTeacher?.role || 'teacher',
+            religion: normalizedReligion || existingTeacher?.religion || ''
+        };
+    };
+
+    const upsertTeacherProfile = async (teacherSeed = {}, { syncToGoogle = false } = {}) => {
+        const teacherProfile = buildTeacherProfile(teacherSeed);
+        const currentTeachers = Array.isArray(data.teachers) ? data.teachers : [];
+        const nextTeachers = (() => {
+            const existingIndex = currentTeachers.findIndex(teacher => String(teacher.id) === String(teacherProfile.id));
+            if (existingIndex >= 0) {
+                return currentTeachers.map(teacher => String(teacher.id) === String(teacherProfile.id) ? teacherProfile : teacher);
+            }
+            return [...currentTeachers, teacherProfile];
+        })();
+
+        setData(prev => ({
+            ...prev,
+            teachers: nextTeachers
+        }));
+
+        let syncResult = null;
+        if (syncToGoogle && settings?.googleScriptUrl) {
+            googleSheetSync.setSettings(settings);
+            syncResult = currentTeachers.some(teacher => String(teacher.id) === String(teacherProfile.id))
+                ? await googleSheetSync.updateTeacher(buildTeacherSyncPayload(teacherProfile))
+                : await googleSheetSync.pushTeacher(buildTeacherSyncPayload(teacherProfile));
+        }
+
+        return { teacherProfile, syncResult };
+    };
+
+    const saveTeacherCredentials = (teacherSeed = {}) => {
+        const normalizedUsername = (teacherSeed.username || '').trim().toLowerCase();
+        if (!normalizedUsername) return;
+
+        const existingCreds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
+        const nextCreds = existingCreds.filter(cred => cred.username !== normalizedUsername);
+
+        nextCreds.push({
+            username: normalizedUsername,
+            password: teacherSeed.password || '',
+            name: (teacherSeed.name || teacherSeed.username || '').trim(),
+            role: teacherSeed.role || 'teacher',
+            subjects: normalizeList(teacherSeed.subjects),
+            grades: normalizeList(teacherSeed.grades),
+            classTeacherGrade: (teacherSeed.classTeacherGrade || '').trim(),
+            religion: (teacherSeed.religion || '').trim()
+        });
+
+        localStorage.setItem('et_teacher_credentials', JSON.stringify(nextCreds));
+    };
+
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
@@ -71,11 +187,6 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
 
         if (!username || !password) {
             setError('Please enter username and password');
-            return;
-        }
-
-        if (!settings?.googleScriptUrl) {
-            setError('Google Sheet not configured. Please configure in Settings.');
             return;
         }
 
@@ -98,6 +209,8 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
                     religion: result.religion || '',
                     isTeacher: true
                 };
+
+                await upsertTeacherProfile(teacherData);
 
                 localStorage.setItem('et_teacher_session', JSON.stringify(teacherData));
                 
@@ -135,83 +248,65 @@ export const TeacherAuth = ({ settings, onLogin, onClose }) => {
             return;
         }
 
-        if (!settings?.googleScriptUrl) {
-            setError('Google Sheet not configured. Please configure in Settings.');
-            return;
-        }
-
         setLoading(true);
 
         try {
-            const result = await googleSheetSync.registerTeacher(
+            const teacherSeed = {
                 username,
                 password,
-                '',
-                name || username,
+                name: name || username,
                 role,
                 subjects,
                 grades,
                 classTeacherGrade,
                 religion
-            );
+            };
 
-            if (result.success) {
-                // Also save locally for offline/login support
-                const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
-                creds.push({
-                    username: username.trim().toLowerCase(),
-                    password: password,
-                    name: name || username,
-                    role: role,
-                    subjects: subjects,
-                    grades: grades,
-                    classTeacherGrade: classTeacherGrade,
-                    religion: religion
-                });
-                localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
-                
-                setSuccess('Account created! You can now login.');
-                setMode('login');
-                setPassword('');
-                setConfirmPassword('');
+            let authResult = { success: false, error: 'Google Sheet not configured' };
+            if (settings?.googleScriptUrl) {
+                authResult = await googleSheetSync.registerTeacher(
+                    username,
+                    password,
+                    '',
+                    name || username,
+                    role,
+                    subjects,
+                    grades,
+                    classTeacherGrade,
+                    religion
+                );
+            }
+
+            saveTeacherCredentials(teacherSeed);
+            const { syncResult } = await upsertTeacherProfile(teacherSeed, { syncToGoogle: !!settings?.googleScriptUrl });
+
+            const registrySaved = !syncResult || syncResult.success;
+            if (authResult.success && registrySaved) {
+                setSuccess('Account created and teacher profile added to the Teachers table. You can now login.');
+            } else if (registrySaved) {
+                setSuccess('Account saved locally and teacher profile added to the Teachers table. You can now login.');
             } else {
-                // Still save locally if Google fails
-                const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
-                if (!creds.find(c => c.username === username.trim().toLowerCase())) {
-                    creds.push({
-                        username: username.trim().toLowerCase(),
-                        password: password,
-                        name: name || username,
-                        role: role,
-                        subjects: subjects,
-                        grades: grades,
-                        classTeacherGrade: classTeacherGrade,
-                        religion: religion
-                    });
-                    localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
-                }
-                setSuccess('Account created locally! You can now login.');
-                setMode('login');
-                setPassword('');
-                setConfirmPassword('');
+                setSuccess('Account created locally. The teacher profile was saved here but Google sync needs retrying from the Teachers table.');
             }
+
+            setMode('login');
+            setPassword('');
+            setConfirmPassword('');
         } catch (err) {
-            // Save locally anyway
-            const creds = JSON.parse(localStorage.getItem('et_teacher_credentials') || '[]');
-            if (!creds.find(c => c.username === username.trim().toLowerCase())) {
-                creds.push({
-                    username: username.trim().toLowerCase(),
-                    password: password,
-                    name: name || username,
-                    role: role,
-                    subjects: subjects,
-                    grades: grades,
-                    classTeacherGrade: classTeacherGrade,
-                    religion: religion
-                });
-                localStorage.setItem('et_teacher_credentials', JSON.stringify(creds));
-            }
-            setSuccess('Account saved locally! You can now login.');
+            const teacherSeed = {
+                username,
+                password,
+                name: name || username,
+                role,
+                subjects,
+                grades,
+                classTeacherGrade,
+                religion
+            };
+
+            saveTeacherCredentials(teacherSeed);
+            await upsertTeacherProfile(teacherSeed);
+            setSuccess('Account saved locally and teacher profile added to the Teachers table. You can now login.');
             setMode('login');
             setPassword('');
             setConfirmPassword('');

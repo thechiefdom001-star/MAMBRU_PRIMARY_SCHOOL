@@ -11,6 +11,31 @@
             if (args[0] && typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com should not be used in production')) return;
             originalWarn.apply(console, args);
         };
+
+        function showStartupError(title, details) {
+            const app = document.getElementById('app');
+            if (!app) return;
+            app.innerHTML = `
+                <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f8fafc;font-family:Inter,sans-serif;">
+                    <div style="max-width:760px;width:100%;background:#fff;border:1px solid #fecaca;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
+                        <h1 style="margin:0 0 12px;font-size:20px;font-weight:800;color:#991b1b;">${title}</h1>
+                        <p style="margin:0 0 12px;color:#7f1d1d;font-size:14px;">The app hit an error before it could finish loading.</p>
+                        <pre style="margin:0;white-space:pre-wrap;word-break:break-word;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;color:#9a3412;font-size:12px;overflow:auto;">${details}</pre>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.addEventListener('error', function (event) {
+            const details = event?.error?.stack || event?.message || 'Unknown startup error';
+            showStartupError('Application Failed To Start', details);
+        });
+
+        window.addEventListener('unhandledrejection', function (event) {
+            const reason = event?.reason;
+            const details = reason?.stack || reason?.message || String(reason || 'Unknown promise rejection');
+            showStartupError('Application Failed To Start', details);
+        });
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
@@ -94,14 +119,13 @@
             }
 
             .page-break {
+                break-before: page;
                 page-break-before: always;
             }
 
             .report-page-break {
+                break-before: page;
                 page-break-before: always;
-                border-top: 1px solid #000;
-                padding-top: 2rem;
-                margin-top: 2rem;
             }
 
             .overflow-x-auto {
@@ -117,37 +141,8 @@
             .sticky {
                 position: static !important;
             }
-            /* Print Orientation using Named Pages */
-            @page portrait-page { 
-                size: A4 portrait; 
+            @page {
                 margin: 10mm;
-            }
-            @page landscape-page { 
-                size: A4 landscape; 
-                margin: 10mm;
-            }
-
-            body.portrait-mode {
-                page: portrait-page;
-            }
-            body.landscape-mode {
-                page: landscape-page;
-            }
-
-            @media print {
-                body {
-                    width: auto !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                }
-                
-                body.portrait-mode {
-                    width: 210mm;
-                }
-                
-                body.landscape-mode {
-                    width: 297mm;
-                }
             }
 
             table {
@@ -171,71 +166,40 @@
                 padding: 4px !important;
             }
 
-            @media print {
-                .report-page-break {
-                    border-top: none;
-                    padding-top: 0;
-                    margin-top: 0;
-                }
+            .report-page-break {
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
 
-                .a4-page {
-                    width: 210mm;
-                    height: 297mm;
-                    padding: 10mm;
-                    margin: 0 auto;
-                    box-sizing: border-box;
-                    position: relative;
-                }
+            /* Keep printed text legible while allowing color printing where supported */
+            * {
+                color: black !important;
+                border-color: #333 !important;
+            }
 
-                .a4-container {
-                    width: 100%;
-                    height: 100%;
-                    display: flex;
-                    flex-direction: column;
-                }
+            .text-slate-400,
+            .text-slate-500,
+            .text-slate-300 {
+                color: #000 !important;
+            }
 
-                /* Keep printed text legible while allowing color printing where supported */
-                * {
-                    color: black !important;
-                    border-color: #333 !important;
-                }
+            .bg-slate-50,
+            .bg-slate-100 {
+                background-color: transparent !important;
+            }
 
-                .text-slate-400,
-                .text-slate-500,
-                .text-slate-300 {
-                    color: #000 !important;
-                }
+            /* Keep background colors for charts where needed */
+            .marklist-graph,
+            .marklist-bar,
+            img,
+            .print-only img {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
 
-                .bg-slate-50,
-                .bg-slate-100 {
-                    background-color: transparent !important;
-                }
-
-                /* Keep background colors for marklist graphs */
-                .marklist-graph {
-                    background-color: #f8fafc !important;
-                    -webkit-print-color-adjust: exact;
-                    print-color-adjust: exact;
-                }
-
-                .marklist-bar {
-                    -webkit-print-color-adjust: exact;
-                    print-color-adjust: exact;
-                }
-
-                /* Allow images to print in color when the printer supports it and center print-only logos */
-                img {
-                    filter: none !important;
-                    -webkit-print-color-adjust: exact;
-                    print-color-adjust: exact;
-                }
-
-                .print-only img {
-                    display: block;
-                    margin: 0 auto;
-                    -webkit-print-color-adjust: exact;
-                    print-color-adjust: exact;
-                }
+            .print-only img {
+                display: block;
+                margin: 0 auto;
             }
 
             .max-w-6xl {
@@ -324,6 +288,108 @@
                 background-color: transparent !important;
                 border: none !important;
                 padding: 0 !important;
+            }
+
+            /* Compact student report printing to avoid extra blank pages */
+            .student-report-sheet {
+                break-inside: auto;
+                page-break-inside: auto;
+            }
+
+            .student-report-summary {
+                gap: 4px !important;
+                margin-top: 6px !important;
+            }
+
+            .student-report-summary > div {
+                padding: 4px !important;
+            }
+
+            .student-report-table {
+                table-layout: fixed !important;
+            }
+
+            .student-report-table th,
+            .student-report-table td {
+                padding: 4px !important;
+                font-size: 9px !important;
+                line-height: 1.15 !important;
+            }
+
+            .student-report-page2-table th,
+            .student-report-page2-table td {
+                padding: 4px !important;
+                font-size: 9px !important;
+                line-height: 1.15 !important;
+            }
+
+            .student-report-graph {
+                display: none !important;
+            }
+
+            .student-report-insights {
+                display: none !important;
+            }
+
+            .student-report-comments,
+            .student-report-comments > div,
+            .student-report-insights > div {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+            .student-report-page2 {
+                margin-top: 0 !important;
+                padding-top: 4px !important;
+            }
+
+            .student-report-footer {
+                margin-top: 8px !important;
+                padding-top: 4px !important;
+            }
+
+            .student-report-comment-text {
+                min-height: 34px !important;
+                max-height: 34px !important;
+                margin-bottom: 6px !important;
+                padding-bottom: 4px !important;
+            }
+
+            .student-report-comments .h-10 {
+                height: 28px !important;
+            }
+
+            .student-report-comments .w-24 {
+                width: 72px !important;
+            }
+
+            .assessment-records-table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+            }
+
+            .assessment-records-table thead {
+                display: table-header-group;
+            }
+
+            .assessment-records-table tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+            .assessment-records-table th,
+            .assessment-records-table td {
+                border: 1px solid #cbd5e1 !important;
+                padding: 6px 8px !important;
+                font-size: 11px !important;
+                color: #0f172a !important;
+            }
+
+            .assessment-records-table th {
+                background-color: #f8fafc !important;
+                font-weight: 800 !important;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
             }
 
             body.print-receipt-only .print-section-table {

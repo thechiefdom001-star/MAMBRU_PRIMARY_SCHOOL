@@ -7,24 +7,100 @@ import { ActivityLog } from './ActivityLog.js';
 
 const html = htm.bind(h);
 
-export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) => {
+const parsePresenceDevice = (device) => {
+    const rawDevice = String(device || '').trim();
+    if (!rawDevice.includes('@') || !rawDevice.includes('#')) return null;
+
+    const [rolePart, rest] = rawDevice.split('@');
+    const hashIndex = rest.lastIndexOf('#');
+    if (hashIndex === -1) return null;
+
+    const username = rest.slice(0, hashIndex).trim();
+    const sessionId = rest.slice(hashIndex + 1).trim();
+    const role = rolePart.trim().toLowerCase();
+
+    if (!role || !username || !sessionId) return null;
+
+    return {
+        role,
+        username,
+        sessionId,
+        canonicalDevice: `${role}@${username}#${sessionId}`
+    };
+};
+
+const getCurrentPresenceDevice = (isAdmin, teacherSession) => {
+    const sessionId = (localStorage.getItem('et_session_id') || '').trim();
+    if (!sessionId) return null;
+
+    if (teacherSession && !isAdmin) {
+        const teacherUsername = (teacherSession.username || teacherSession.name || '').trim().toLowerCase();
+        return teacherUsername ? `teacher@${teacherUsername}#${sessionId}` : null;
+    }
+
+    if (isAdmin) {
+        const adminUsername = (localStorage.getItem('et_login_username') || '').trim().toLowerCase();
+        return adminUsername ? `admin@${adminUsername}#${sessionId}` : null;
+    }
+
+    return null;
+};
+
+const dedupeActiveUsers = (users = []) => {
+    const bySession = new Map();
+
+    users.forEach(user => {
+        const parsed = parsePresenceDevice(user.device);
+        if (!parsed) return;
+
+        const key = `${parsed.role}#${parsed.sessionId}`;
+        const candidateTime = Number(user.lastActivity || user.timestamp || 0);
+        const existing = bySession.get(key);
+        const existingParsed = existing ? parsePresenceDevice(existing.device) : null;
+        const existingTime = Number(existing?.lastActivity || existing?.timestamp || 0);
+
+        const shouldReplace = (
+            !existing ||
+            candidateTime > existingTime ||
+            (candidateTime === existingTime && parsed.username.length > (existingParsed?.username?.length || 0))
+        );
+
+        if (shouldReplace) {
+            bySession.set(key, {
+                ...user,
+                device: parsed.canonicalDevice
+            });
+        }
+    });
+
+    return Array.from(bySession.values()).sort(
+        (a, b) => Number(b.lastActivity || b.timestamp || 0) - Number(a.lastActivity || a.timestamp || 0)
+    );
+};
+
+export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSession }) => {
     const [activeUsers, setActiveUsers] = useState([]);
     const [lastActivity, setLastActivity] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const refreshRef = useRef(false); // Prevent concurrent refreshes
     
-    // Use real-time data from props, but allow refresh from Google
-    const [students, setStudents] = useState(data?.students || []);
-    const [payments, setPayments] = useState(data?.payments || []);
-    const [assessments, setAssessments] = useState(data?.assessments || []);
+    const students = data?.students || [];
+    const payments = data?.payments || [];
+    const assessments = data?.assessments || [];
     const settings = data?.settings || { currency: 'KES.', grades: [], feeStructures: [] };
-    
-    // Sync with prop data when it changes
-    useEffect(() => {
-        setStudents(data?.students || []);
-        setPayments(data?.payments || []);
-        setAssessments(data?.assessments || []);
-    }, [data?.students, data?.payments, data?.assessments]);
+
+    const applyGoogleRefresh = (result) => {
+        if (!result?.success || typeof setData !== 'function') return;
+
+        setData(prev => Storage.replaceWithGoogleData(prev, {
+            students: result.students ?? null,
+            assessments: result.assessments ?? null,
+            attendance: result.attendance ?? null,
+            payments: result.payments ?? null,
+            teachers: result.teachers ?? null,
+            staff: result.staff ?? null
+        }));
+    };
     
     // Fetch fresh data from Google Sheet periodically
     const refreshFromGoogle = async () => {
@@ -38,9 +114,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
             const result = await googleSheetSync.fetchAll();
             
             if (result.success) {
-                setStudents(result.students || data?.students || []);
-                setPayments(result.payments || data?.payments || []);
-                setAssessments(result.assessments || data?.assessments || []);
+                applyGoogleRefresh(result);
                 console.log('📊 Dashboard refreshed from Google:', result.students?.length, 'students');
             }
         } catch (error) {
@@ -58,12 +132,8 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
         try {
             googleSheetSync.setSettings(settings);
             
-            // Get current device ID
-            const storedUsername = localStorage.getItem('et_login_username');
-            const sessionId = localStorage.getItem('et_session_id') || '';
-            const username = storedUsername || (teacherSession?.username || teacherSession?.name) || 'user';
-            
-            let currentDeviceId = isAdmin ? `admin@${username}#${sessionId}` : `teacher@${username}#${sessionId}`;
+            const currentDeviceId = getCurrentPresenceDevice(isAdmin, teacherSession);
+            if (!currentDeviceId) return;
             
             console.log('👥 REFRESH: Registering:', currentDeviceId);
             
@@ -78,7 +148,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
             
             if (result.success && result.activeUsers) {
                 console.log('👥 REFRESH: Setting users:', result.activeUsers.map(u => u.device));
-                setActiveUsers(result.activeUsers);
+                setActiveUsers(dedupeActiveUsers(result.activeUsers));
             } else {
                 console.log('👥 REFRESH: No users or error:', result);
             }
@@ -95,18 +165,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
             try {
                 googleSheetSync.setSettings(settings);
                 
-                // Register ourselves
-                const storedUsername = localStorage.getItem('et_login_username');
-                const sessionId = localStorage.getItem('et_session_id') || '';
-                
-                let currentDeviceId = null;
-                if (isAdmin) {
-                    const username = storedUsername || 'admin';
-                    currentDeviceId = `admin@${username}#${sessionId}`;
-                } else if (teacherSession) {
-                    const username = teacherSession.username || teacherSession.name || 'teacher';
-                    currentDeviceId = `teacher@${username}#${sessionId}`;
-                }
+                const currentDeviceId = getCurrentPresenceDevice(isAdmin, teacherSession);
                 
                 if (currentDeviceId) {
                     await googleSheetSync.setActiveUser(currentDeviceId);
@@ -117,7 +176,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
                 console.log('👥 Raw active users:', result);
                 
                 if (result.success) {
-                    const users = result.activeUsers || [];
+                    const users = dedupeActiveUsers(result.activeUsers || []);
                     console.log('👥 Setting users:', users.length, users.map(u => u.device));
                     setActiveUsers(users);
                     
@@ -138,7 +197,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
         const interval = setInterval(checkActiveUsers, 5000);
         
         return () => clearInterval(interval);
-    }, [settings.googleScriptUrl]);
+    }, [settings.googleScriptUrl, isAdmin, teacherSession]);
     
     // Auto-refresh data from Google every 30 seconds
     useEffect(() => {
@@ -154,9 +213,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
                 const result = await googleSheetSync.fetchAll();
                 
                 if (result.success) {
-                    setStudents(result.students || data?.students || []);
-                    setPayments(result.payments || data?.payments || []);
-                    setAssessments(result.assessments || data?.assessments || []);
+                    applyGoogleRefresh(result);
                 }
             } catch (error) {
                 console.warn('Dashboard refresh error:', error);
@@ -173,16 +230,16 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
         const refreshInterval = setInterval(doRefresh, 30000);
         
         return () => clearInterval(refreshInterval);
-    }, [settings.googleScriptUrl, settings]);
+    }, [settings.googleScriptUrl]);
 
     const totalStudents = students.length;
     const totalTeachers = (data?.teachers || []).length;
     const totalStaff = (data?.staff || []).length;
-    const totalFeesCollected = (data?.payments || [])
+    const totalFeesCollected = payments
         .filter(p => !p.voided)
         .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const expectedFees = students.reduce((sum, s) => {
-        const fin = Storage.getStudentFinancials(s, data.payments, settings);
+        const fin = Storage.getStudentFinancials(s, payments, settings);
         return sum + fin.totalDue;
     }, 0);
     const totalArrears = expectedFees - totalFeesCollected;
@@ -190,7 +247,7 @@ export const Dashboard = ({ data, googleSyncStatus, isAdmin, teacherSession }) =
 
     const feesPerGrade = (settings.grades || []).map(grade => {
         const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
-        const total = (data?.payments || [])
+        const total = payments
             .filter(p => gradeStudentIds.includes(p.studentId) && !p.voided)
             .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
         return { grade, total };
