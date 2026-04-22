@@ -359,10 +359,65 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
         setNewStudent({ ...newStudent, selectedFees: updated });
     };
 
-    // BYPASS ALL FILTERS - show all students by default
-    const filteredStudents = studentsData; // Show ALL students, no filtering
+    // RESTORED: Original working filter logic
+    const filteredStudents = bypassFilters 
+        ? studentsData 
+        : studentsData.filter(s => {
+            const searchLower = searchTerm.toLowerCase();
+            const matchesSearch = !searchTerm ||
+                (s.name && s.name.toLowerCase().includes(searchLower)) ||
+                (s.admissionNo && s.admissionNo.toLowerCase().includes(searchLower)) ||
+                (s.grade && s.grade.toLowerCase().includes(searchLower)) ||
+                (s.stream && s.stream.toLowerCase().includes(searchLower)) ||
+                (s.parentContact && s.parentContact.toString().includes(searchTerm));
+
+            if (!matchesSearch) {
+                if (searchTerm && studentsData.indexOf(s) < 3) console.log(`[Filter Debug] ${s.name} rejected by search: "${searchTerm}"`);
+                return false;
+            }
+
+            const matchesGrade = filterGrade === 'ALL' || s.grade === filterGrade;
+            if (!matchesGrade) {
+                if (studentsData.indexOf(s) < 3) console.log(`[Filter Debug] ${s.name} rejected by grade: ${s.grade} != ${filterGrade}`);
+                return false;
+            }
+
+            const matchesStream = filterStream === 'ALL' || s.stream === filterStream;
+            if (!matchesStream) {
+                if (studentsData.indexOf(s) < 3) console.log(`[Filter Debug] ${s.name} rejected by stream: ${s.stream} != ${filterStream}`);
+                return false;
+            }
+
+            const matchesReligion = !allowedReligion || !s.religion || (s.religion && s.religion.toLowerCase() === allowedReligion.toLowerCase());
+            if (!matchesReligion) {
+                if (studentsData.indexOf(s) < 3) console.log(`[Filter Debug] ${s.name} rejected by religion: ${s.religion} != ${allowedReligion}`);
+                return false;
+            }
+            
+            // Status filter: active, left, or all
+            const studentStatus = s.status || 'active';
+            const matchesStatus = filterStatus === 'all' || studentStatus === filterStatus;
+            if (!matchesStatus) {
+                if (studentsData.indexOf(s) < 3) console.log(`[Filter Debug] ${s.name} rejected by status: ${studentStatus} != ${filterStatus}`);
+                return false;
+            }
+
+            if (filterFinance === 'ALL') return true;
+
+            const feeStructure = settingsData.feeStructures?.find(f => f.grade === s.grade);
+            const selectedKeys = s.selectedFees || ['t1', 't2', 't3'];
+            const totalDue = (Number(s.previousArrears) || 0) + (feeStructure ? selectedKeys.reduce((sum, key) => sum + (feeStructure[key] || 0), 0) : 0);
+            const totalPaid = paymentsData.filter(p => String(p.studentId) === String(s.id) && !p.voided).reduce((sum, p) => sum + Number(p.amount), 0);
+            const balance = totalDue - totalPaid;
+
+            if (filterFinance === 'FULL') return balance <= 0 && totalDue > 0;
+            if (filterFinance === 'HALF') return totalPaid >= (totalDue / 2) && balance > 0;
+            if (filterFinance === 'ARREARS') return balance > 0;
+
+            return true;
+        });
     
-    console.log(`[Students] Showing ALL students: ${filteredStudents.length}`);
+    console.log(`[Students] Filtered: ${filteredStudents.length} of ${studentsData.length} students`);
 
     // Simple pagination - just slice the array
     const safeFilteredStudents = filteredStudents || [];
@@ -518,7 +573,14 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                         class="bg-orange-100 text-orange-700 px-3 py-2 rounded-xl text-sm font-bold hover:bg-orange-200 border border-orange-200"
                         title="Reset all filters to show every student"
                     >
-                        🔄 Reset Filters
+                        🔄 Reset
+                    </button>
+                    <button 
+                        onClick=${() => setBypassFilters(!bypassFilters)}
+                        class=${`px-3 py-2 rounded-xl text-sm font-bold border ${bypassFilters ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'}`}
+                        title=${bypassFilters ? 'Disable bypass mode - apply filters' : 'Bypass all filters - show all students'}
+                    >
+                        ${bypassFilters ? '✓ Filters Bypassed' : 'Bypass Filters'}
                     </button>
                     <${PrintButtons} />
                     ${data.settings.googleScriptUrl && html`
@@ -809,6 +871,16 @@ export const Students = ({ data, setData, onSelectStudent, isAdmin, teacherSessi
                                 <td class="px-4 py-2 text-slate-500 text-xs font-mono">${student.admissionDate || '-'}</td>
                                 <td class="px-4 py-2 text-slate-500 text-xs font-mono">${student.upiNo || '-'}</td>
                                 <td class="px-4 py-2 text-slate-500 text-xs font-mono">${student.assessmentNo || '-'}</td>
+                                <td class="px-4 py-2">
+                                    <span class=${`px-2 py-1 rounded-full text-[9px] font-black uppercase ${
+                                        student.religion === 'Christian' ? 'bg-blue-100 text-blue-700' :
+                                        student.religion === 'Islam' ? 'bg-green-100 text-green-700' :
+                                        student.religion === 'Hindu' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-slate-100 text-slate-400'
+                                    }`}>
+                                        ${student.religion || 'NONE'}
+                                    </span>
+                                </td>
                                 <td class="px-4 py-2 text-slate-700 text-xs font-bold">${student.parentContact || '-'}</td>
                                 <td class="px-4 py-2">
                                     <div class="flex flex-col gap-1">

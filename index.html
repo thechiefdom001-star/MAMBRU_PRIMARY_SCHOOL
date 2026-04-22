@@ -38,6 +38,11 @@
         });
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
     <script type="importmap">
         {
             "imports": {
@@ -323,10 +328,6 @@
                 line-height: 1.15 !important;
             }
 
-            .student-report-graph {
-                display: none !important;
-            }
-
             .student-report-insights {
                 display: none !important;
             }
@@ -361,6 +362,39 @@
 
             .student-report-comments .w-24 {
                 width: 72px !important;
+            }
+
+            /* Scale termly reports to fit on 1 A4 page */
+            .student-report-sheet {
+                transform: scale(0.85);
+                transform-origin: top center;
+                width: 117% !important; /* Compensate for scale to use full width */
+                margin-left: -8.5% !important;
+            }
+            
+            /* Alternative: Use zoom for better browser support */
+            @supports (zoom: 1) {
+                .student-report-sheet {
+                    zoom: 0.85;
+                    transform: none;
+                    width: 100% !important;
+                    margin-left: 0 !important;
+                }
+            }
+            
+            /* Ensure page breaks don't occur within report */
+            .student-report-container {
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+            
+            /* Compact graphs for single page */
+            .student-report-graph {
+                max-height: 120px !important;
+            }
+            .student-report-graph canvas,
+            .student-report-graph svg {
+                max-height: 110px !important;
             }
 
             .assessment-records-table {

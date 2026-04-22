@@ -81,6 +81,7 @@ const dedupeActiveUsers = (users = []) => {
 export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSession }) => {
     const [activeUsers, setActiveUsers] = useState([]);
     const [lastActivity, setLastActivity] = useState(null);
+    const [recentActivities, setRecentActivities] = useState([]);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const refreshRef = useRef(false); // Prevent concurrent refreshes
     
@@ -98,7 +99,8 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
             attendance: result.attendance ?? null,
             payments: result.payments ?? null,
             teachers: result.teachers ?? null,
-            staff: result.staff ?? null
+            staff: result.staff ?? null,
+            calendar: result.calendar ?? null
         }));
     };
     
@@ -212,8 +214,11 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                 googleSheetSync.setSettings(settings);
                 const result = await googleSheetSync.fetchAll();
                 
-                if (result.success) {
-                    applyGoogleRefresh(result);
+                
+                // Fetch recent activities from Log
+                const logResult = await googleSheetSync.getRecentActivities(10);
+                if (logResult) {
+                    setRecentActivities(logResult);
                 }
             } catch (error) {
                 console.warn('Dashboard refresh error:', error);
@@ -232,13 +237,17 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
         return () => clearInterval(refreshInterval);
     }, [settings.googleScriptUrl]);
 
-    const totalStudents = students.length;
+    // FIXED: Filter out inactive students (status = 'left') from dashboard counts
+    const activeStudents = students.filter(s => (s.status || 'active') === 'active');
+    const inactiveStudents = students.filter(s => s.status === 'left');
+    
+    const totalStudents = activeStudents.length;
     const totalTeachers = (data?.teachers || []).length;
     const totalStaff = (data?.staff || []).length;
     const totalFeesCollected = payments
         .filter(p => !p.voided)
         .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-    const expectedFees = students.reduce((sum, s) => {
+    const expectedFees = activeStudents.reduce((sum, s) => {
         const fin = Storage.getStudentFinancials(s, payments, settings);
         return sum + fin.totalDue;
     }, 0);
@@ -246,7 +255,7 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
     const feePercentage = expectedFees > 0 ? (totalFeesCollected / expectedFees) * 100 : 0;
 
     const feesPerGrade = (settings.grades || []).map(grade => {
-        const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
+        const gradeStudentIds = activeStudents.filter(s => s.grade === grade).map(s => s.id);
         const total = payments
             .filter(p => gradeStudentIds.includes(p.studentId) && !p.voided)
             .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -255,7 +264,7 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
     const maxGradeFee = Math.max(...feesPerGrade.map(f => f.total), 1);
 
     const assessmentActivity = (settings.grades || []).map(grade => {
-        const gradeStudents = students.filter(s => s.grade === grade);
+        const gradeStudents = activeStudents.filter(s => s.grade === grade);
         const totalEnrolled = gradeStudents.length;
         
         const gradeStudentIds = new Set(gradeStudents.map(s => String(s.id)));
@@ -366,7 +375,7 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
 
             <!-- Horizontally scrollable panels on mobile -->
             <div class="flex overflow-x-auto no-scrollbar md:grid md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 pb-4 -mx-4 px-4 md:mx-0 md:px-0">
-                <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Students" value=${totalStudents} subtitle="Enrollment" icon="👥" color="blue" /></div>
+                <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Students" value=${totalStudents} subtitle=${inactiveStudents.length > 0 ? `Enrollment (+${inactiveStudents.length} left)` : "Enrollment"} icon="👥" color="blue" /></div>
                 <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Teachers" value=${totalTeachers} subtitle="Academic" icon="👨‍🏫" color="orange" /></div>
                 <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Staff" value=${totalStaff} subtitle="Support" icon="🛠️" color="cyan" /></div>
                 <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Paid" value=${`${settings.currency} ${totalFeesCollected.toLocaleString()}`} subtitle=${`${feePercentage.toFixed(1)}% Target`} icon="💰" color="green" /></div>
@@ -381,22 +390,44 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                         Recent Activity
                     </h3>
                     <div class="space-y-1">
-                        ${payments.slice(-5).reverse().map((p, idx) => {
-        const student = (students || []).find(s => String(s.id) === String(p.studentId));
-        return html`
-                                <div class=${`flex justify-between items-center p-3 rounded-xl border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-slate-50/50' : ''}`}>
-                                    <div>
-                                        <p class="font-bold text-xs md:text-sm text-slate-700">${student?.name || 'Unknown Student'}</p>
-                                        <p class="text-[10px] text-slate-400">Payment Received • ${p.date}</p>
+                        ${(recentActivities || []).map((activity, idx) => html`
+                                <div class=${`flex items-center gap-3 p-3 rounded-xl border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-slate-50/50' : ''}`}>
+                                    <div class=${`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-sm border ${
+                                        activity.module === 'Payments' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
+                                        activity.module === 'Calendar' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 
+                                        activity.module === 'Students' ? 'bg-blue-50 text-blue-600 border-blue-100' : 
+                                        'bg-slate-50 text-slate-600 border-slate-100'
+                                    }`}>
+                                        ${activity.module === 'Calendar' ? '📅' : 
+                                          activity.module === 'Payments' ? '💳' : 
+                                          activity.module === 'Students' ? '🎓' : '📝'}
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="font-bold text-[11px] md:text-xs text-slate-800 truncate">
+                                            ${activity.recordName || (activity.details ? activity.details.split(':').pop().trim() : 'Record')}
+                                        </p>
+                                        <p class="text-[9px] text-slate-400 capitalize">
+                                            ${activity.userName} • ${activity.action === 'ADD' ? 'added' : activity.action === 'UPDATE' ? 'updated' : activity.action.toLowerCase()} • ${new Date(activity.timestamp).toLocaleDateString()}
+                                        </p>
                                     </div>
                                     <div class="text-right">
-                                        <span class="text-green-600 font-black text-xs md:text-sm">+${settings.currency} ${p.amount.toLocaleString()}</span>
-                                        <p class="text-[8px] text-slate-300 font-mono uppercase">${p.receiptNo || 'N/A'}</p>
+                                        ${activity.module === 'Payments' && html`
+                                            <div class="mb-1">
+                                                <span class="text-green-600 font-black text-xs md:text-sm block leading-none">
+                                                    +${settings.currency} ${(payments.find(p => String(p.id) === String(activity.recordId))?.amount || 0).toLocaleString()}
+                                                </span>
+                                                <span class="text-[8px] text-slate-300 font-mono uppercase tracking-tighter">
+                                                    ${payments.find(p => String(p.id) === String(activity.recordId))?.receiptNo || 'N/A'}
+                                                </span>
+                                            </div>
+                                        `}
+                                        <span class="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                                            ${activity.module}
+                                        </span>
                                     </div>
                                 </div>
-                            `;
-    })}
-                        ${payments.length === 0 && html`<p class="text-center text-slate-300 py-4 text-sm">No recent payments recorded</p>`}
+                            `)}
+                        ${recentActivities.length === 0 && html`<p class="text-center text-slate-300 py-4 text-sm font-medium italic">No recent activity found</p>`}
                     </div>
                 </div>
 
@@ -425,8 +456,8 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                         <!-- Bars -->
                         <div class="absolute inset-0 flex items-end justify-between gap-1 px-1">
                             ${(settings.grades || []).map((grade, index) => {
-        const count = students.filter(s => s.grade === grade).length;
-        const maxCount = Math.max(...settings.grades.map(g => students.filter(s => s.grade === g).length), 1);
+        const count = activeStudents.filter(s => s.grade === grade).length;
+        const maxCount = Math.max(...settings.grades.map(g => activeStudents.filter(s => s.grade === g).length), 1);
         const heightPct = (count / maxCount) * 100;
         const colors = ['bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-orange-400', 'bg-pink-400', 'bg-yellow-400', 'bg-cyan-400', 'bg-indigo-400'];
         const color = colors[index % colors.length];

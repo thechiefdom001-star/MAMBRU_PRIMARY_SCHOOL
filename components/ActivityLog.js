@@ -37,7 +37,8 @@ const MODULE_LABELS = {
     'Payments': '💳 Payments',
     'Teachers': '👨‍🏫 Teachers',
     'Staff': '🛠️ Staff',
-    'Auth': '🔐 Authentication'
+    'Auth': '🔐 Authentication',
+    'Calendar': '📅 Calendar'
 };
 
 export const ActivityLog = ({ settings, isAdmin, teacherSession, limit = 20 }) => {

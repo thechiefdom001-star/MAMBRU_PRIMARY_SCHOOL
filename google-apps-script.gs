@@ -39,7 +39,9 @@ const SHEET_NAMES = {
   TEACHER_CREDENTIALS: 'TeacherCredentials',  // For teacher login credentials
   ACTIVITY_LOG: 'ActivityLog',  // For logging all user activities
   BACKUP_METADATA: 'Backup_Metadata',  // Track backups
-  SYNC_STATUS: 'SyncStatus'  // Track sync operations
+  SYNC_STATUS: 'SyncStatus',  // Track sync operations
+  PARENTS: 'Parents',
+  CALENDAR: 'Calendar'
 };
 
 // Rate limiting configuration
@@ -81,6 +83,8 @@ const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'n
 const ACTIVITY_LOG_HEADERS = ['id', 'userId', 'userName', 'userRole', 'action', 'module', 'recordId', 'recordName', 'details', 'timestamp', 'ipAddress'];
 const BACKUP_METADATA_HEADERS = ['backupName', 'sheetName', 'createdAt', 'recordCount'];
 const SYNC_STATUS_HEADERS = ['lastSyncTime', 'syncType', 'recordCount', 'status', 'errorMessage'];
+const PARENT_HEADERS = ['id', 'admissionNo', 'name', 'contact', 'email', 'createdAt', 'lastLogin'];
+const CALENDAR_HEADERS = ['id', 'title', 'start', 'end', 'type', 'details', 'term', 'academicYear'];
 
 // Cache for frequently accessed data
 const dataCache = CacheService.getScriptCache();
@@ -111,7 +115,9 @@ function initializeSheets() {
     { name: SHEET_NAMES.TEACHER_CREDENTIALS, headers: TEACHER_CREDENTIALS_HEADERS },
     { name: SHEET_NAMES.ACTIVITY_LOG, headers: ACTIVITY_LOG_HEADERS },
     { name: SHEET_NAMES.BACKUP_METADATA, headers: BACKUP_METADATA_HEADERS },
-    { name: SHEET_NAMES.SYNC_STATUS, headers: SYNC_STATUS_HEADERS }
+    { name: SHEET_NAMES.SYNC_STATUS, headers: SYNC_STATUS_HEADERS },
+    { name: SHEET_NAMES.PARENTS, headers: PARENT_HEADERS },
+    { name: SHEET_NAMES.CALENDAR, headers: CALENDAR_HEADERS }
   ];
   
   sheetsConfig.forEach(config => {
@@ -164,6 +170,39 @@ function updateSheetHeaders(sheet, expectedHeaders) {
   }
 }
 
+function getSheetHealthCheck() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetsCheck = {};
+  
+  const sheetsToCheck = [
+    SHEET_NAMES.STUDENTS,
+    SHEET_NAMES.ASSESSMENTS,
+    SHEET_NAMES.TEACHERS,
+    SHEET_NAMES.STAFF,
+    SHEET_NAMES.PAYMENTS,
+    SHEET_NAMES.ATTENDANCE
+  ];
+  
+  sheetsToCheck.forEach(function(sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+      const firstRow = lastRow > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+      sheetsCheck[sheetName] = {
+        exists: true,
+        rows: lastRow,
+        columns: lastCol,
+        hasHeaders: firstRow.length > 0 && firstRow[0] !== ''
+      };
+    } else {
+      sheetsCheck[sheetName] = { exists: false, rows: 0, columns: 0, hasHeaders: false };
+    }
+  });
+  
+  return sheetsCheck;
+}
+
 // ==================== CORE CRUD OPERATIONS ====================
 
 function getAllRecords(sheetName, headers, useCache = true) {
@@ -207,7 +246,9 @@ function getAllRecords(sheetName, headers, useCache = true) {
         value = 't1,t2,t3';
       }
       
-      if (value && typeof value === 'object') {
+      if (value && value instanceof Date) {
+        value = value.toISOString();
+      } else if (value && typeof value === 'object') {
         value = String(value).includes('java.lang') ? '' : JSON.stringify(value);
       }
       
@@ -220,10 +261,18 @@ function getAllRecords(sheetName, headers, useCache = true) {
       obj.studentName = String(obj.studentName || '');
     }
     
-    if (idValue && !seenIds.has(idValue)) {
+    // Ensure we have an ID for the record - generate one if manual entry is missing ID
+    if (!idValue) {
+      idValue = 'AUTO-' + sheetName.substring(0,3).toUpperCase() + '-' + rowIndex;
+      obj.id = idValue;
+    }
+    
+    if (!seenIds.has(idValue)) {
       const headerNames = ['id', 'name', 'grade', 'stream', 'admissionNo', 'parentContact', 'selectedFees', 
                           'studentId', 'studentAdmissionNo', 'studentName', 'subject', 'score', 'term',
                           'examType', 'academicYear', 'date', 'level', 'status'];
+      
+      // Safety check: skip if ID is actually a header name (case-insensitive)
       if (headerNames.indexOf(idValue.toLowerCase()) === -1) {
         seenIds.add(idValue);
         results.push(obj);
@@ -342,18 +391,58 @@ function addRecord(sheetName, record, headers, userId = null, userName = null, u
     
     console.log('[addRecord] Row values:', rowValues);
 
-    let action = 'add';
+    let action = 'ADD';
     if (rowIndex > 0) {
       sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowValues]);
-      action = 'update';
+      action = 'UPDATE';
       console.log('[addRecord] Updated row:', rowIndex);
     } else {
       sheet.appendRow(rowValues);
-      action = 'add';
+      action = 'ADD';
       console.log('[addRecord] Added new row');
     }
     
     dataCache.remove(`records_${sheetName}`);
+    
+    // ONLY log if it's a teacher or admin action
+    if (userId && userRole && (userRole === 'teacher' || userRole === 'admin')) {
+      let recordName = record.title || record.name || record.studentName || record.studentAdmissionNo || '';
+      
+      // If no name (e.g. for payments/assessments), try looking up the student in the Students sheet
+      if (!recordName && (sheetName === SHEET_NAMES.PAYMENTS || sheetName === SHEET_NAMES.ASSESSMENTS)) {
+        const studentId = record.studentId || record.studentAdmissionNo;
+        if (studentId) {
+          const studentSheet = ss.getSheetByName(SHEET_NAMES.STUDENTS);
+          if (studentSheet) {
+            const studentData = studentSheet.getDataRange().getValues();
+            const idIdx = STUDENT_HEADERS.indexOf('id');
+            const admIdx = STUDENT_HEADERS.indexOf('admissionNo');
+            const nameIdx = STUDENT_HEADERS.indexOf('name');
+            
+            for (let i = 1; i < studentData.length; i++) {
+              if (String(studentData[i][idIdx]) === String(studentId) || 
+                  String(studentData[i][admIdx]) === String(studentId)) {
+                recordName = studentData[i][nameIdx];
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      if (!recordName) recordName = record.id || 'Unknown';
+
+      logUserActivity({
+        userId,
+        userName: userName || userId,
+        userRole,
+        action,
+        module: sheetName,
+        recordId: record.id,
+        recordName,
+        details: `School data ${action.toLowerCase()}ed: ${sheetName} entry ${recordName}`
+      });
+    }
     
     const result = { success: true, id: record.id, message: 'Record ' + action + 'ed', action: action };
     console.log('[addRecord] Returning:', JSON.stringify(result));
@@ -1116,6 +1205,105 @@ function deleteTeacherAccount(username) {
   return { success: false, error: 'Account not found' };
 }
 
+function loginParent(admissionNo, studentName) {
+  if (!admissionNo || !studentName) {
+    return { success: false, error: 'Both student name and admission number are required' };
+  }
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const studentSheet = ss.getSheetByName(SHEET_NAMES.STUDENTS);
+  
+  if (!studentSheet) {
+    return { success: false, error: 'Students data not found' };
+  }
+  
+  const data = studentSheet.getDataRange().getValues();
+  if (data.length < 2) return { success: false, error: 'No students found' };
+  
+  const headers = data[0].map(h => String(h || '').trim());
+  const admIndex = headers.indexOf('admissionNo');
+  
+  if (admIndex === -1) {
+    // Fallback to searching all columns if header not exact match
+    return { success: false, error: 'Admission system column error' };
+  }
+  
+  const nameIndex = headers.indexOf('name');
+  const idIndex = headers.indexOf('id');
+  const parentIndex = headers.indexOf('parentContact');
+  
+  for (let i = 1; i < data.length; i++) {
+    const storedAdmNo = String(data[i][admIndex] || '').trim();
+    const storedName = String(data[i][nameIndex >= 0 ? nameIndex : 1] || '').trim();
+    
+    const isAdmMatch = storedAdmNo.toLowerCase() === admissionNo.toLowerCase().trim();
+    const isNameMatch = storedName.toLowerCase().includes(studentName.toLowerCase().trim()) || 
+                      studentName.toLowerCase().trim().includes(storedName.toLowerCase());
+                      
+    if (isAdmMatch && isNameMatch) {
+      const studentNameResult = storedName;
+      const studentId = String(data[i][idIndex >= 0 ? idIndex : 0] || '');
+      const parentName = String(data[i][parentIndex >= 0 ? parentIndex : 8] || 'Parent of ' + studentNameResult);
+      
+      // Update or add to Parents sheet for tracking
+      let parentSheet = ss.getSheetByName(SHEET_NAMES.PARENTS);
+      if (!parentSheet) {
+        parentSheet = ss.insertSheet(SHEET_NAMES.PARENTS);
+        parentSheet.appendRow(PARENT_HEADERS);
+      }
+      
+      const parentsData = parentSheet.getDataRange().getValues();
+      let parentRow = -1;
+      const pAdmIndex = PARENT_HEADERS.indexOf('admissionNo');
+      
+      for (let j = 1; j < parentsData.length; j++) {
+        if (String(parentsData[j][pAdmIndex]).trim().toLowerCase() === admissionNo.toLowerCase().trim()) {
+          parentRow = j + 1;
+          break;
+        }
+      }
+      
+      const now = new Date().toISOString();
+      if (parentRow > 0) {
+        parentSheet.getRange(parentRow, PARENT_HEADERS.indexOf('lastLogin') + 1).setValue(now);
+      } else {
+        const newParentRow = PARENT_HEADERS.map(h => {
+          if (h === 'id') return 'PAR-' + Date.now();
+          if (h === 'admissionNo') return admissionNo;
+          if (h === 'name') return parentName;
+          if (h === 'createdAt') return now;
+          if (h === 'lastLogin') return now;
+          return '';
+        });
+        parentSheet.appendRow(newParentRow);
+      }
+
+      // Log parent login
+      logUserActivity({
+        userId: admissionNo,
+        userName: parentName,
+        userRole: 'parent',
+        action: 'LOGIN',
+        module: 'Parent Portal',
+        details: `Parent logged in matching: ${studentNameResult} (${admissionNo})`
+      });
+
+      return {
+        success: true,
+        message: 'Login successful',
+        admissionNo: storedAdmNo,
+        studentName: studentNameResult,
+        studentId: studentId,
+        parentName: parentName,
+        role: 'parent'
+      };
+    }
+  }
+  
+  return { success: false, error: 'Validation failed: Student name or admission number does not match.' };
+}
+
+
 // ==================== BACKUP SYSTEM ====================
 
 function createBackup(sheetName) {
@@ -1346,6 +1534,470 @@ function addMissingColumnsToSheets() {
   return { success: true, message: 'Columns added to sheets' };
 }
 
+// ==================== CLASS ASSESSMENT SHEET FUNCTIONS ====================
+
+/**
+ * Generate class sheet name from grade/stream
+ * Examples: "Class_6_Assessment", "Class_7A_Assessment"
+ */
+function getClassSheetName(grade, stream) {
+  const cleanGrade = String(grade || '').trim();
+  if (!cleanGrade) return null;
+  
+  // If stream provided, include it
+  if (stream && stream.trim()) {
+    const cleanStream = String(stream || '').trim();
+    return `Class_${cleanGrade}_${cleanStream}_Assessment`;
+  }
+  
+  return `Class_${cleanGrade}_Assessment`;
+}
+
+/**
+ * Check if a class assessment sheet exists
+ */
+function classSheetExists(grade, stream) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetName = getClassSheetName(grade, stream);
+    if (!sheetName) return false;
+    
+    const sheet = ss.getSheetByName(sheetName);
+    return sheet !== null;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Get all class assessment sheet names
+ * Supports both patterns:
+ * - Grade_Assessments_[Grade]_[Term]_[ExamType]
+ * - Class_[Grade]_Assessment
+ */
+function getAllClassAssessmentSheets() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheets = ss.getSheets();
+    return sheets
+      .map(s => s.getName())
+      .filter(name => 
+        (name.includes('Class_') && name.includes('_Assessment')) ||
+        (name.startsWith('Grade_Assessments_')) ||
+        (name.startsWith('MX_'))
+      );
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Fetch assessments from class sheet with fallback to general sheet
+ * Supports both matrix sheets (Grade_Assessments_*) and flat assessment sheets (Class_*_Assessment)
+ * Priority: Specific grade/term/exam sheet > General class sheet > General Assessments Sheet
+ */
+function getAssessmentsWithClassFallback(grade, term, examType, academicYear) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let assessments = [];
+    let sheetUsed = null;
+    
+    console.log(`[Assessment] ==========  FETCHING  ==========`);
+    console.log(`[Assessment] Parameters: grade="${grade}", term="${term}", examType="${examType}", year="${academicYear}"`);
+    
+    // First priority: Look for exact Grade_Assessments_[Grade]_[Term]_[ExamType] sheet
+    if (grade && term && examType) {
+      const targetSheetName = `Grade_Assessments_${grade}_${term}_${examType}`.replace(/\//g, '-').replace(/\s+/g, '_');
+      console.log(`[Assessment] Trying exact sheet: ${targetSheetName}`);
+      const targetSheet = ss.getSheetByName(targetSheetName);
+      
+      if (targetSheet) {
+        assessments = parseMatrixSheet(targetSheet, grade, term, examType, academicYear);
+        if (assessments.length > 0) {
+          sheetUsed = targetSheetName;
+          console.log(`[Assessment] ✓ Using matrix sheet: ${sheetUsed}, found ${assessments.length} records`);
+          return assessments;
+        }
+      } else {
+        console.log(`[Assessment] ✗ Exact sheet not found`);
+      }
+    }
+    
+    // Second priority: Look for Grade_Assessments sheets that match grade/term/examType
+    const possibleSheets = getAllClassAssessmentSheets()
+      .filter(s => s.startsWith('Grade_Assessments_'));
+    
+    console.log(`[Assessment] Searching ${possibleSheets.length} Grade_Assessments sheets for: grade=${grade}, term=${term}, examType=${examType}`);
+    
+    for (const sheetName of possibleSheets) {
+      // Parse sheet name: Grade_Assessments_Grade_7_T1_Opener
+      const nameMatch = sheetName.match(/Grade_Assessments_(.+)_(T\d)_(.+)/);
+      if (!nameMatch) {
+        console.log(`[Assessment] Could not parse: ${sheetName}`);
+        continue;
+      }
+      
+      const sheetGrade = nameMatch[1].replace(/_/g, ' ').trim();
+      const sheetTerm = nameMatch[2];
+      const sheetExamType = nameMatch[3];
+      
+      console.log(`[Assessment] Checking ${sheetName}: parsed as grade="${sheetGrade}", term="${sheetTerm}", examType="${sheetExamType}"`);
+      
+      // If params are provided, must match; if not provided, accept any
+      const gradeMatch = !grade || sheetGrade.toLowerCase() === String(grade).toLowerCase();
+      const termMatch = !term || sheetTerm === String(term).trim();
+      const examTypeMatch = !examType || sheetExamType === String(examType).trim();
+      
+      if (gradeMatch && termMatch && examTypeMatch) {
+        console.log(`[Assessment] ✓ Match found: ${sheetName}`);
+        const sheet = ss.getSheetByName(sheetName);
+        if (sheet) {
+          assessments = parseMatrixSheet(sheet, sheetGrade, sheetTerm, sheetExamType, academicYear);
+          if (assessments.length > 0) {
+            sheetUsed = sheetName;
+            console.log(`[Assessment] Using matrix sheet: ${sheetUsed}, found ${assessments.length} records`);
+            return assessments;
+          }
+        }
+      }
+    }
+    
+    // Third priority: Look for Class_[Grade]_Assessment pattern
+    if (grade) {
+      const possibleClassSheets = getAllClassAssessmentSheets()
+        .filter(s => s.startsWith('Class_'));
+      const gradeStr = String(grade).toLowerCase().trim();
+      
+      for (const sheetName of possibleClassSheets) {
+        if (sheetName.toLowerCase().includes(gradeStr)) {
+          const sheet = ss.getSheetByName(sheetName);
+          if (sheet) {
+            const data = sheet.getDataRange().getValues();
+            if (data.length > 1) {
+              assessments = parseAssessmentSheet(sheet, ASSESSMENT_HEADERS);
+              if (assessments.length > 0) {
+                sheetUsed = sheetName;
+                console.log(`[Assessment] Using class sheet: ${sheetUsed}, found ${assessments.length} records`);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // If found from class sheets, apply additional filters
+    if (assessments.length > 0) {
+      if (term) {
+        assessments = assessments.filter(a => a.term === term);
+      }
+      if (examType) {
+        assessments = assessments.filter(a => a.examType === examType);
+      }
+      if (academicYear) {
+        assessments = assessments.filter(a => !a.academicYear || a.academicYear === academicYear);
+      }
+      
+      if (assessments.length > 0 && sheetUsed) {
+        console.log(`[Assessment] Filtered to ${assessments.length} records from ${sheetUsed}`);
+        return assessments;
+      }
+    }
+    
+    // Final fallback: General Assessments sheet
+    console.log(`[Assessment] No matching class sheets found, falling back to general Assessments sheet`);
+    const generalSheetAssessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
+    console.log(`[Assessment] General sheet has ${generalSheetAssessments.length} total records`);
+    assessments = generalSheetAssessments;
+    
+    if (term) {
+      assessments = assessments.filter(a => a.term === term);
+      console.log(`[Assessment] After term filter: ${assessments.length} records`);
+    }
+    if (grade) {
+      const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
+      const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
+      assessments = assessments.filter(a => gradeStudentIds.includes(a.studentId));
+      console.log(`[Assessment] After grade filter: ${assessments.length} records`);
+    }
+    if (examType) {
+      assessments = assessments.filter(a => a.examType === examType);
+      console.log(`[Assessment] After examType filter: ${assessments.length} records`);
+    }
+    if (academicYear) {
+      assessments = assessments.filter(a => !a.academicYear || a.academicYear === academicYear);
+      console.log(`[Assessment] After year filter: ${assessments.length} records`);
+    }
+    
+    console.log(`[Assessment] ========== FINAL RESULT ==========`);
+    console.log(`[Assessment] Returning ${assessments.length} assessments (from general sheet fallback)`);
+    return assessments;
+  } catch (error) {
+    console.error('[Assessment] Error fetching with fallback:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Get default subjects for a grade (used when no custom subjects are configured)
+ * This mirrors the Storage.getSubjectsForGrade logic from the frontend
+ */
+function getDefaultSubjectsForGrade(grade) {
+  const gUpper = String(grade || '').toUpperCase().trim();
+  const seniorGrades = ['GRADE 10', 'GRADE 11', 'GRADE 12'];
+  
+  // FIXED: More comprehensive normalization
+  const normalized = gUpper.replace(/PRE-PRIMARY/g, 'PP')
+                           .replace(/PRE\s+PRIMARY/g, 'PP')
+                           .replace(/PREPRIMARY/g, 'PP')
+                           .replace(/BABY\s+CLASS/g, 'PP1')
+                           .replace(/BABYCLASS/g, 'PP1')
+                           .replace(/NURSERY/g, 'PP2')
+                           .replace(/RECEPTION/g, 'PP2')
+                           .replace(/KINDERGARTEN/g, 'PP')
+                           .replace(/GRADE/g, '')
+                           .replace(/CLASS/g, '')
+                           .replace(/\s+/g, '');
+  
+  if (normalized === 'PP1' || normalized === 'PP2' || gUpper.includes('PP1') || gUpper.includes('PP2')) {
+    return ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'];
+  } else if (gUpper === 'GRADE 1' || gUpper === 'GRADE 2' || gUpper === 'GRADE 3' || gUpper === '1' || gUpper === '2' || gUpper === '3') {
+    return ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'];
+  } else if (gUpper === 'GRADE 4' || gUpper === 'GRADE 5' || gUpper === 'GRADE 6') {
+    return ['ENGLISH', 'KISWAHILI/KSL', 'MATHEMATICS', 'AGRICULTURE', 'SOCIAL STUDIES', 'RELIGIOUS EDUCATION', 'CREATIVE ARTS', 'SCIENCE & TECHNOLOGY'];
+  } else if (['GRADE 7', 'GRADE 8', 'GRADE 9'].includes(gUpper)) {
+    return ['ENGLISH', 'MATHEMATICS', 'KISWAHILI/KSL', 'SOCIAL STUDIES', 'PRE-TECHNICAL STUDIES', 'CREATIVE ARTS & SPORTS', 'AGRICULTURE & NUTRITION', 'INTEGRATED SCIENCE', 'RELIGIOUS EDUCATION'];
+  } else if (seniorGrades.includes(gUpper)) {
+    return ['English', 'Kiswahili', 'Mathematics', 'CSL', 'Biology', 'Chemistry', 'Physics', 'Agriculture', 'Computer Studies', 'History and Citizenship', 'Geography', 'CRE', 'IRE', 'Accounting', 'Economics', 'Fine Arts', 'Music and Dance', 'Sports Science', 'Business Studies', 'Physical Education', 'ICT'];
+  }
+  
+  return ['Mathematics', 'English', 'Science'];
+}
+
+/**
+ * Parse a matrix-format sheet into flat assessment records
+ * Matrix format: Row 1 = Headers (ID, Name, Subject1, Subject2, ...)
+ *                Rows 2+ = Student rows with marks
+ */
+function parseMatrixSheet(sheet, grade, term, examType, academicYear) {
+  try {
+    const data = sheet.getDataRange().getValues();
+    console.log(`[Matrix] Sheet has ${data.length} rows total`);
+    
+    if (data.length <= 1) {
+      console.log(`[Matrix] ERROR: Sheet has no data rows (only ${data.length} row)`);
+      return [];
+    }
+    
+    const headers = data[0].map(h => String(h || '').trim());
+    console.log(`[Matrix] Headers found: ${JSON.stringify(headers)}`);
+    
+    const assessments = [];
+    const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
+    console.log(`[Matrix] Total students in system: ${students.length}`);
+    
+    if (students.length === 0) {
+      console.log(`[Matrix] WARNING: No students in system to match against!`);
+    }
+    
+    const studentMap = new Map();
+    students.forEach(s => {
+      if (s.id) studentMap.set(String(s.id).toLowerCase(), s);
+      if (s.admissionNo) studentMap.set(String(s.admissionNo).toLowerCase(), s);
+      if (s.name) studentMap.set(String(s.name).toLowerCase(), s);
+    });
+    
+    console.log(`[Matrix] Student map built with ${studentMap.size} entries`);
+    
+    // Parse each row (starting from row 2, since row 1 is headers)
+    let rowsParsed = 0;
+    let rowsSkipped = 0;
+    let scoresProcessed = 0;
+    let scoresSkipped = 0;
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const studentId = String(row[0] || '').trim();
+      const studentName = String(row[1] || '').trim();
+      
+      if (!studentId && !studentName) {
+        console.log(`[Matrix] Row ${i + 1}: SKIPPED (empty student ID and name)`);
+        rowsSkipped++;
+        continue;
+      }
+      
+      rowsParsed++;
+      console.log(`[Matrix] Row ${i + 1}: StudentID="${studentId}", Name="${studentName}"`);
+      
+      // Find student from map
+      let student = studentMap.get(studentId.toLowerCase());
+      if (!student && studentName) {
+        student = studentMap.get(studentName.toLowerCase());
+      }
+      
+      if (!student) {
+        console.log(`[Matrix]  ⚠️ Student not found in system (ID="${studentId}", Name="${studentName}")`);
+      }
+      
+      // Process each subject (columns starting from index 2)
+      for (let j = 2; j < headers.length; j++) {
+        const subject = String(headers[j] || '').trim();
+        const scoreValue = row[j];
+        
+        if (!subject) {
+          console.log(`[Matrix]   Column ${j}: SKIPPED (no subject header)`);
+          scoresSkipped++;
+          continue;
+        }
+        
+        if (scoreValue === '' || scoreValue === null || scoreValue === undefined) {
+          console.log(`[Matrix]   Column ${j} (${subject}): SKIPPED (empty cell)`);
+          scoresSkipped++;
+          continue;
+        }
+        
+        const score = Number(scoreValue);
+        if (isNaN(score) && scoreValue !== 0) {
+          console.log(`[Matrix]   Column ${j} (${subject}): SKIPPED (invalid score: "${scoreValue}")`);
+          scoresSkipped++;
+          continue;
+        }
+        
+        scoresProcessed++;
+        const assessment = {
+          id: `A-${Date.now()}-${i}-${j}`,
+          studentId: student?.id || studentId,
+          studentAdmissionNo: student?.admissionNo || studentId,
+          studentName: student?.name || studentName,
+          grade: String(grade).trim(),
+          subject: subject,
+          score: score,
+          term: String(term).trim(),
+          examType: String(examType).trim(),
+          academicYear: academicYear || '2025/2026',
+          date: new Date().toISOString().split('T')[0],
+          level: '',
+          rawScore: score,
+          maxScore: 100
+        };
+        
+        console.log(`[Matrix]   ✓ Score: ${subject}=${score}`);
+        assessments.push(assessment);
+      }
+    }
+    
+    console.log(`[Matrix] SUMMARY: Parsed ${rowsParsed} data rows, skipped ${rowsSkipped} rows`);
+    console.log(`[Matrix] SUMMARY: Processed ${scoresProcessed} scores, skipped ${scoresSkipped} cells`);
+    console.log(`[Matrix] SUMMARY: Final assessments created: ${assessments.length}`);
+    
+    if (assessments.length === 0) {
+      console.log(`[Matrix] ERROR: No assessments were parsed! Check matrix sheet format.`);
+    }
+    
+    return assessments;
+  } catch (error) {
+    console.error('[Matrix] Parse error:', error.message);
+    console.error('[Matrix] Stack:', error.stack);
+    return [];
+  }
+}
+
+/**
+ * Parse a flat assessment sheet into assessment records
+ */
+function parseAssessmentSheet(sheet, headers) {
+  try {
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    
+    const assessments = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const assessment = {};
+      
+      headers.forEach((header, index) => {
+        assessment[header] = row[index] || '';
+      });
+      
+      if (assessment.id) {
+        assessments.push(assessment);
+      }
+    }
+    
+    return assessments;
+  } catch (error) {
+    console.error('[Assessment] Parse error:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Get all assessments from all sources (class sheets + general sheet)
+ * Merges and deduplicates by assessment ID
+ * Handles both matrix sheets (Grade_Assessments_*) and flat sheets (Class_*_Assessment)
+ */
+function getAllAssessmentsIncludingClassSheets() {
+  try {
+    const allAssessments = [];
+    const seenIds = new Set();
+    
+    // Fetch from all class sheets first (highest priority)
+    const classSheets = getAllClassAssessmentSheets();
+    for (const sheetName of classSheets) {
+      try {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) continue;
+        
+        const data = sheet.getDataRange().getValues();
+        if (data.length <= 1) continue;
+        
+        let sheetAssessments = [];
+        
+        // Check if this is a matrix sheet (Grade_Assessments_*)
+        if (sheetName.startsWith('Grade_Assessments_')) {
+          // Parse sheet name to get grade, term, examType
+          const nameMatch = sheetName.match(/Grade_Assessments_(.+)_(T\d)_(.+)/);
+          if (nameMatch) {
+            const grade = nameMatch[1].replace(/_/g, ' ');
+            const term = nameMatch[2];
+            const examType = nameMatch[3];
+            sheetAssessments = parseMatrixSheet(sheet, grade, term, examType, '2025/2026');
+          }
+        } else {
+          // Flat assessment sheet
+          sheetAssessments = parseAssessmentSheet(sheet, ASSESSMENT_HEADERS);
+        }
+        
+        // Add to result, avoiding duplicates
+        for (const assessment of sheetAssessments) {
+          if (assessment.id && !seenIds.has(assessment.id)) {
+            seenIds.add(assessment.id);
+            allAssessments.push(assessment);
+          }
+        }
+      } catch (e) {
+        console.warn(`[Assessment] Error reading ${sheetName}:`, e.message);
+      }
+    }
+    
+    // Then fetch from general Assessments sheet
+    const generalAssessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
+    for (const assessment of generalAssessments) {
+      if (assessment.id && !seenIds.has(assessment.id)) {
+        seenIds.add(assessment.id);
+        allAssessments.push(assessment);
+      }
+    }
+    
+    console.log(`[Assessment] Total assessments (all sources): ${allAssessments.length}`);
+    return allAssessments;
+  } catch (error) {
+    console.error('[Assessment] Error fetching all assessments:', error.message);
+    return getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
+  }
+}
+
 // ==================== UTILITY FUNCTIONS ====================
 
 function getGrades() {
@@ -1429,20 +2081,37 @@ function getHeadersForSheet(sheetName) {
     [SHEET_NAMES.ATTENDANCE]: ATTENDANCE_HEADERS,
     [SHEET_NAMES.TEACHERS]: TEACHER_HEADERS,
     [SHEET_NAMES.STAFF]: STAFF_HEADERS,
-    [SHEET_NAMES.PAYMENTS]: PAYMENT_HEADERS
+    [SHEET_NAMES.PAYMENTS]: PAYMENT_HEADERS,
+    [SHEET_NAMES.CALENDAR]: CALENDAR_HEADERS
   };
   return headersMap[sheetName] || [];
 }
 
 // ==================== DOGET & DOPOST HANDLERS ====================
 
+/**
+ * Handle CORS preflight requests
+ */
+function doOptions(e) {
+  return ContentService.createTextOutput('')
+    .setMimeType(ContentService.MimeType.TEXT)
+    .addHeader('Access-Control-Allow-Origin', '*')
+    .addHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    .addHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 function doGet(e) {
+  // Initialize sheets first to ensure headers exist
+  try {
+    initializeSheets();
+  } catch (err) {
+    console.log('[Script] Warning during sheet init:', err);
+  }
+  
   const rateCheck = checkRateLimit();
   if (rateCheck) {
     return createJsonResponse(rateCheck);
   }
-  
-  initializeSheets();
   
   const action = e?.parameter?.action || 'getAll';
   let response = {};
@@ -1568,6 +2237,17 @@ function doGet(e) {
         payment.date = new Date().toISOString().split('T')[0];
       }
       response = addRecord(SHEET_NAMES.PAYMENTS, payment, PAYMENT_HEADERS,
+        e?.parameter?.userId, e?.parameter?.userName, e?.parameter?.userRole);
+      return createJsonResponse(response);
+    }
+
+    // Handle addCalendar via GET
+    if (action === 'addCalendar' && postData.calendar) {
+      const event = postData.calendar;
+      if (!event.id) {
+        event.id = 'EVT-' + Date.now();
+      }
+      response = addRecord(SHEET_NAMES.CALENDAR, event, CALENDAR_HEADERS,
         e?.parameter?.userId, e?.parameter?.userName, e?.parameter?.userRole);
       return createJsonResponse(response);
     }
@@ -1734,18 +2414,35 @@ function doGet(e) {
       return createJsonResponse(response);
     }
     
+    // Handle ping for connection testing
+    if (action === 'ping') {
+      response = {
+        success: true,
+        message: 'Connection successful',
+        timestamp: new Date().toISOString(),
+        serverTime: new Date().getTime(),
+        sheetStatus: getSheetHealthCheck()
+      };
+      return createJsonResponse(response);
+    }
+    
     switch (action) {
       case 'getAll':
         response = {
           success: true,
           timestamp: new Date().toISOString(),
           students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
-          assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
+          assessments: getAllAssessmentsIncludingClassSheets(),
           attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
           teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
           staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
-          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS)
+          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS),
+          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS, false)
         };
+        break;
+        
+      case 'getCalendar':
+        response = { success: true, calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS, false) };
         break;
         
       case 'getStudents':
@@ -1753,18 +2450,34 @@ function doGet(e) {
         break;
         
       case 'getAssessments':
-        let assessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
         const term = e?.parameter?.term;
         const grade = e?.parameter?.grade;
+        const examType = e?.parameter?.examType;
+        const academicYear = e?.parameter?.academicYear;
         
-        if (term) {
-          assessments = assessments.filter(a => a.term === term);
+        // Use class-aware fetching with fallback to general assessments
+        let assessments = getAssessmentsWithClassFallback(grade, term, examType, academicYear);
+        
+        // If no assessments from class sheet, try general sheet as final fallback
+        if (assessments.length === 0) {
+          assessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
+          
+          if (term) {
+            assessments = assessments.filter(a => a.term === term);
+          }
+          if (grade) {
+            const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
+            const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
+            assessments = assessments.filter(a => gradeStudentIds.includes(a.studentId));
+          }
+          if (examType) {
+            assessments = assessments.filter(a => a.examType === examType);
+          }
+          if (academicYear) {
+            assessments = assessments.filter(a => !a.academicYear || a.academicYear === academicYear);
+          }
         }
-        if (grade) {
-          const students = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS);
-          const gradeStudentIds = students.filter(s => s.grade === grade).map(s => s.id);
-          assessments = assessments.filter(a => gradeStudentIds.includes(a.studentId));
-        }
+        
         response = { success: true, assessments: assessments };
         break;
         
@@ -1787,6 +2500,158 @@ function doGet(e) {
         
       case 'getPayments':
         response = { success: true, payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS) };
+        break;
+        
+      case 'getClassSheets':
+        response = { 
+          success: true, 
+          classSheets: getAllClassAssessmentSheets(),
+          count: getAllClassAssessmentSheets().length
+        };
+        break;
+        
+      case 'classSheetExists':
+        const csGrade = e?.parameter?.grade;
+        const csStream = e?.parameter?.stream;
+        const exists = classSheetExists(csGrade, csStream);
+        response = { 
+          success: true, 
+          exists: exists,
+          grade: csGrade,
+          stream: csStream,
+          sheetName: exists ? getClassSheetName(csGrade, csStream) : null
+        };
+        break;
+        
+      case 'debugGradeSheets':
+        // List all Grade_Assessments sheets and their data counts
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const allSheets = ss.getSheets();
+        const gradeSheets = allSheets
+          .filter(s => s.getName().startsWith('Grade_Assessments_'))
+          .map(s => ({
+            name: s.getName(),
+            rows: s.getLastRow() - 1,
+            cols: s.getLastColumn()
+          }));
+        
+        response = {
+          success: true,
+          gradeSheets: gradeSheets,
+          count: gradeSheets.length,
+          message: `Found ${gradeSheets.length} Grade_Assessments sheets`
+        };
+        break;
+        
+      case 'debugAssessments':
+        // Show what's currently in the Assessments sheet
+        const assessmentSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.ASSESSMENTS);
+        const assData = assessmentSheet ? assessmentSheet.getDataRange().getValues() : [];
+        const assHeaders = assData.length > 0 ? assData[0] : [];
+        
+        response = {
+          success: true,
+          assessmentSheet: {
+            name: SHEET_NAMES.ASSESSMENTS,
+            totalRows: assData.length,
+            dataRows: assData.length - 1,
+            columns: assHeaders,
+            preview: assData.slice(0, Math.min(6, assData.length))
+          },
+          message: `Assessments sheet has ${assData.length - 1} data rows`
+        };
+        break;
+        
+      case 'debugSyncTest':
+        // Test the sync for a specific matrix sheet
+        const testSheetName = e?.parameter?.sheetName;
+        if (!testSheetName) {
+          response = { success: false, error: 'sheetName parameter required' };
+        } else {
+          const testSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(testSheetName);
+          if (!testSheet) {
+            response = { success: false, error: `Sheet "${testSheetName}" not found` };
+          } else {
+            const testData = testSheet.getDataRange().getValues();
+            const testParsed = parseMatrixSheet(testSheet, 'TEST_GRADE', 'T1', 'Opener', '2025/2026');
+            response = {
+              success: true,
+              sheetName: testSheetName,
+              rawData: {
+                rows: testData.length,
+                headers: testData[0],
+                preview: testData.slice(0, 3)
+              },
+              parsed: {
+                count: testParsed.length,
+                preview: testParsed.slice(0, 3)
+              }
+            };
+          }
+        }
+        break;
+        
+      case 'forceReloadAll':
+        // Force clear cache and reload all data fresh
+        dataCache.removeAll();
+        console.log('[Debug] Cache cleared');
+        response = {
+          success: true,
+          assessments: getAllAssessmentsIncludingClassSheets(),
+          students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
+          message: 'Data reloaded fresh from sheets (cache cleared)'
+        };
+        break;
+        
+      case 'fetchMatrixSheet':
+        // Fetch raw data from a specific matrix sheet
+        const matrixSheetName = e?.parameter?.sheetName;
+        if (!matrixSheetName) {
+          response = { success: false, error: 'Missing sheetName parameter' };
+        } else {
+          const matrixSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(matrixSheetName);
+          if (!matrixSheet) {
+            response = { success: false, error: `Sheet "${matrixSheetName}" not found` };
+          } else {
+            const matrixData = matrixSheet.getDataRange().getValues();
+            response = {
+              success: true,
+              sheetName: matrixSheetName,
+              totalRows: matrixData.length,
+              totalCols: matrixData[0] ? matrixData[0].length : 0,
+              headers: matrixData[0] || [],
+              preview: matrixData.slice(0, 6) // First 5 data rows + header
+            };
+          }
+        }
+        break;
+        
+      case 'getAssessmentsFromSheet':
+        // Manually fetch assessments from a specific Grade_Assessments sheet
+        const sheetToFetch = e?.parameter?.sheetName;
+        const gradeParam = e?.parameter?.grade || '';
+        const termParam = e?.parameter?.term || '';
+        const examTypeParam = e?.parameter?.examType || '';
+        
+        if (!sheetToFetch) {
+          response = { success: false, error: 'Missing sheetName parameter' };
+        } else {
+          const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetToFetch);
+          if (!sheet) {
+            response = { success: false, error: `Sheet "${sheetToFetch}" not found` };
+          } else {
+            const assessmentsFromMatrix = parseMatrixSheet(sheet, gradeParam, termParam, examTypeParam, '2025/2026');
+            response = {
+              success: true,
+              sheetName: sheetToFetch,
+              grade: gradeParam,
+              term: termParam,
+              examType: examTypeParam,
+              totalAssessments: assessmentsFromMatrix.length,
+              assessments: assessmentsFromMatrix.slice(0, 10) // First 10
+            };
+          }
+        }
         break;
         
       case 'ping':
@@ -1953,6 +2818,50 @@ function doGet(e) {
         response = testSetup();
         break;
         
+      // Matrix operations via GET
+      case 'CREATE_MATRIX':
+        let matrixSubjects = [];
+        if (e?.parameter?.subjects) {
+          try {
+            const rawSubs = e.parameter.subjects;
+            if (typeof rawSubs === 'string') {
+              try { 
+                matrixSubjects = JSON.parse(decodeURIComponent(rawSubs)); 
+              } catch (e1) { 
+                matrixSubjects = JSON.parse(rawSubs); 
+              }
+            } else {
+              matrixSubjects = rawSubs;
+            }
+          } catch (err) {
+            console.error('Subject parsing error:', err);
+            matrixSubjects = [];
+          }
+        }
+        if (!Array.isArray(matrixSubjects)) matrixSubjects = [];
+        response = processMatrixRequest('CREATE_MATRIX', e?.parameter?.grade, e?.parameter?.term, e?.parameter?.examType, null, matrixSubjects);
+        break;
+        
+      case 'UPDATE_MATRIX_CELL':
+        response = processMatrixRequest('UPDATE_MATRIX_CELL', e?.parameter?.studentId, e?.parameter?.subject, e?.parameter?.score, e?.parameter?.grade, e?.parameter?.term, e?.parameter?.examType);
+        break;
+        
+      case 'SYNC_MATRIX':
+        response = processMatrixRequest('SYNC_MATRIX', null, null, null, e?.parameter?.sheetName);
+        break;
+        
+      case 'LIST_MATRICES':
+        response = processMatrixRequest('LIST_MATRICES', null, null, null, null);
+        break;
+        
+      case 'DELETE_MATRIX':
+        response = processMatrixRequest('DELETE_MATRIX', null, null, null, e?.parameter?.sheetName);
+        break;
+
+      case 'loginParent':
+        response = loginParent(e?.parameter?.admissionNo, e?.parameter?.studentName);
+        break;
+        
       default:
         response = { success: false, error: 'Unknown action: ' + action };
     }
@@ -1965,12 +2874,17 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  // Initialize sheets first to ensure headers exist
+  try {
+    initializeSheets();
+  } catch (err) {
+    console.log('[Script] Warning during sheet init:', err);
+  }
+  
   const rateCheck = checkRateLimit();
   if (rateCheck) {
     return createJsonResponse(rateCheck);
   }
-  
-  initializeSheets();
   
   let data = {};
   
@@ -2208,11 +3122,13 @@ function doPost(e) {
         response = {
           success: true,
           students: getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS),
-          assessments: getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS),
+          assessments: getAllAssessmentsIncludingClassSheets(),
           attendance: getAllRecords(SHEET_NAMES.ATTENDANCE, ATTENDANCE_HEADERS),
           teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
           staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
-          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS)
+          payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS),
+          parents: getAllRecords(SHEET_NAMES.PARENTS, PARENT_HEADERS),
+          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS)
         };
         break;
         
@@ -2235,6 +3151,10 @@ function doPost(e) {
           username: data.username,
           password: data.password
         });
+        break;
+
+      case 'loginParent':
+        response = loginParent(data.admissionNo, data.studentName);
         break;
         
       case 'getTeacherCredentials':
@@ -2288,6 +3208,27 @@ function doPost(e) {
         response = testSetup();
         break;
         
+      // Matrix operations (from AssessmentMatrix.gs)
+      case 'CREATE_MATRIX':
+        response = processMatrixRequest('CREATE_MATRIX', data.grade, data.term, data.examType, null, data.subjects);
+        break;
+        
+      case 'UPDATE_MATRIX_CELL':
+        response = processMatrixRequest('UPDATE_MATRIX_CELL', data.studentId, data.subject, data.score, data.grade, data.term, data.examType);
+        break;
+        
+      case 'SYNC_MATRIX':
+        response = processMatrixRequest('SYNC_MATRIX', null, null, null, data.sheetName);
+        break;
+        
+      case 'LIST_MATRICES':
+        response = processMatrixRequest('LIST_MATRICES', null, null, null, null);
+        break;
+        
+      case 'DELETE_MATRIX':
+        response = processMatrixRequest('DELETE_MATRIX', null, null, null, data.sheetName);
+        break;
+        
       default:
         response = { success: false, error: 'Unknown action: ' + action };
     }
@@ -2303,4 +3244,437 @@ function doPost(e) {
 
 function onOpen() {
   initializeSheets();
+}
+
+// ==================== MATRIX OPERATIONS ====================
+
+function processMatrixRequest(action, param1, param2, param3, param4, param5) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (action === 'CREATE_MATRIX') {
+      const grade = param1, term = param2, examType = param3;
+      const subjects = param5 || [];
+      // SHORTENED PREFIX TO STAY UNDER 31 CHAR LIMIT
+      const sheetName = `MX_${grade}_${term}_${examType}`.replace(/\//g, '-').replace(/\s+/g, '_').substring(0, 31);
+
+      // Get all students for this grade - BYPASS CACHE TO BE SURE
+      const allStudents = getAllRecords(SHEET_NAMES.STUDENTS, STUDENT_HEADERS, false);
+      
+      const normalize = (g) => {
+        let val = String(g || '').toUpperCase().trim();
+        // Handle PP <=> Pre-Primary aliases - FIXED: normalize BEFORE removing GRADE/CLASS
+        val = val.replace(/PRE-PRIMARY/gi, 'PP')
+                 .replace(/PRE\s+PRIMARY/gi, 'PP')
+                 .replace(/PREPRIMARY/gi, 'PP')
+                 .replace(/BABY\s+CLASS/gi, 'PP1')
+                 .replace(/BABYCLASS/gi, 'PP1')
+                 .replace(/NURSERY/gi, 'PP2')
+                 .replace(/RECEPTION/gi, 'PP2')
+                 .replace(/KINDERGARTEN/gi, 'PP');
+        // Handle common variations - remove spaces FIRST to catch compound names
+        val = val.replace(/\s+/g, '')  // Remove all whitespace
+                 .replace(/GRADE/g, '')
+                 .replace(/CLASS/g, '')
+                 .trim();
+        return val;
+      };
+
+      const searchGrade = String(grade || '').toUpperCase().trim();
+      if (!searchGrade || searchGrade === 'UNDEFINED' || searchGrade === '') {
+        return { success: false, error: 'Grade parameter is missing. Please select a Grade/Class first.' };
+      }
+      const searchGradeNorm = normalize(searchGrade);
+      // Extra fuzzy: if PP1, look for just the number
+      const searchNumber = searchGrade.replace(/[^0-9]/g, '');
+
+      console.log(`[Matrix] Creating for: "${searchGrade}" (Norm: "${searchGradeNorm}", Num: "${searchNumber}")`);
+      console.log(`[Matrix] Total system students: ${allStudents.length}`);
+
+      let students = allStudents.filter(s => {
+        const sGrade = String(s.grade || '').toUpperCase().trim();
+        const sGradeNorm = normalize(sGrade);
+        
+        // Strategy 1: Exact match (case-insensitive via toUpperCase)
+        const isExactMatch = sGrade === searchGrade;
+        // Strategy 2: Normalized match (after alias conversion)
+        const isNormMatch = sGradeNorm === searchGradeNorm;
+        // Strategy 3: Partial match (useful for "Grade 8" vs "GRADE8")
+        const isPartialMatch = sGradeNorm.startsWith(searchGradeNorm) || searchGradeNorm.startsWith(sGradeNorm);
+        // Strategy 4: Special handling for early years (PP1, PP2, BABY CLASS, NURSERY, etc.)
+        const isEarlyYears = (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2') && 
+                            (sGradeNorm === 'PP1' || sGradeNorm === 'PP2' || 
+                             sGrade.includes('BABY') || sGrade.includes('NURSERY') || 
+                             sGrade.includes('RECEPTION') || sGrade.includes('KINDERGARTEN'));
+
+        return isExactMatch || isNormMatch || isPartialMatch || (searchGrade.includes('PP') && isEarlyYears);
+      });
+
+      // RESCUE MODE: If still 0, try even fuzzier (numeric match for early years)
+      if (students.length === 0 && searchNumber.length > 0) {
+        console.log(`[Matrix] Entering Rescue Mode for grade ${searchGrade}...`);
+        students = allStudents.filter(s => {
+          const sGrad = String(s.grade || '').toUpperCase();
+          const sGradNorm = normalize(sGrad);
+          // For early years, also check normalized versions
+          return sGrad.includes(searchGrade) || sGrad.includes(searchNumber) || 
+                 sGradNorm.includes(searchGradeNorm) || sGradNorm.includes(searchNumber);
+        });
+      }
+
+      // FINAL RESCUE: If searching for PP1/PP2 and still getting 0, be very aggressive
+      if (students.length === 0 && (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2')) {
+        console.log(`[Matrix] FINAL RESCUE MODE for early years: ${searchGrade}...`);
+        students = allStudents.filter(s => {
+          const sGrad = String(s.grade || '').toUpperCase();
+          const sGradNorm = normalize(sGrad);
+          // Match any early years student if searching for early years
+          return sGrad.match(/PP1|PP2|BABY|NURSERY|RECEPTION|KINDERGARTEN|PRE-PRIMARY|PRE PRIMARY|PREPRIMARY/) ? true : false;
+        });
+        // If still nothing, keep only the ones that match our search
+        students = students.filter(s => {
+          const sGrad = String(s.grade || '').toUpperCase();
+          const sGradNorm = normalize(sGrad);
+          return sGradNorm === searchGradeNorm;
+        });
+      }
+
+      console.log(`[Matrix] Students matched: ${students.length}`);
+      
+      // LOG DIAGNOSTICS to the sheet for the user to see
+      logUserActivity({
+        userId: 'SYSTEM',
+        userName: 'MatrixEngine',
+        userRole: 'admin',
+        action: 'DIAGNOSTIC',
+        module: 'Matrix',
+        details: `Grade: ${searchGrade} | Matched: ${students.length}/${allStudents.length} | First 5 system grades: ${allStudents.slice(0, 5).map(x => x.grade).join(', ')}`
+      });
+
+      if (students.length === 0 && allStudents.length > 0) {
+        const sampleGrades = [...new Set(allStudents.slice(0, 30).map(s => s.grade))].join(', ');
+        return { 
+          success: false, 
+          error: `No students found for grade "${searchGrade}".`,
+          foundGrades: sampleGrades,
+          totalStudents: allStudents.length
+        };
+      }
+
+
+      // Remove existing sheet to rebuild with error protection
+      try {
+        const existing = ss.getSheetByName(sheetName);
+        if (existing) ss.deleteSheet(existing);
+      } catch (e) {
+        console.warn(`[Matrix] Delete existing sheet failed: ${e.message}`);
+      }
+
+      let sheet;
+      try {
+        sheet = ss.insertSheet(sheetName);
+      } catch (e) {
+        console.error(`[Matrix] Insert sheet failed: ${e.message}`);
+        // Fallback: If 31 char limit is still an issue or name conflict
+        const altName = `MX_${Date.now()}`.substring(0, 31);
+        sheet = ss.insertSheet(altName);
+        console.log(`[Matrix] Used fallback sheet name: ${altName}`);
+      }
+
+      // FIXED: If no subjects provided, retrieve them from settings or defaults
+      let finalSubjects = subjects;
+      if (!finalSubjects || finalSubjects.length === 0) {
+        console.log(`[Matrix] No subjects provided, retrieving from Settings...`);
+        // Try to get from Settings sheet
+        const settingsSheet = ss.getSheetByName('Settings');
+        if (settingsSheet) {
+          const settingsData = settingsSheet.getDataRange().getValues();
+          for (let i = 0; i < settingsData.length; i++) {
+            if (settingsData[i][0] === 'gradeSubjects' && settingsData[i][1]) {
+              try {
+                const gradeSubjectsMap = JSON.parse(settingsData[i][1]);
+                const normalizedSearchGrade = normalize(searchGrade);
+                // Try to find subjects by various grade name matches
+                for (const [key, value] of Object.entries(gradeSubjectsMap)) {
+                  if (normalize(key) === normalizedSearchGrade || key === searchGrade) {
+                    finalSubjects = Array.isArray(value) ? value : [];
+                    console.log(`[Matrix] ✓ Found subjects in Settings for "${key}": ${finalSubjects.length} subjects`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                console.warn(`[Matrix] Settings gradeSubjects parse error: ${e.message}`);
+              }
+              break;
+            }
+          }
+        }
+        
+        // If still no subjects, use defaults for the grade
+        if (!finalSubjects || finalSubjects.length === 0) {
+          console.log(`[Matrix] Using default subjects for grade: ${searchGrade}`);
+          const defaults = getDefaultSubjectsForGrade(searchGrade);
+          finalSubjects = defaults;
+          console.log(`[Matrix] Default subjects: ${finalSubjects.join(', ')}`);
+        }
+      }
+
+      // Header row: Admission No, Name, [subjects...]
+      const headerRow = ['Admission No', 'Name', ...finalSubjects];
+      console.log(`[Matrix] Writing headers with ${finalSubjects.length} subjects: ${JSON.stringify(headerRow.slice(0, 5))}...`);
+      sheet.appendRow(headerRow);
+
+      // Header formatting - wrap in try catch to prevent total failure on formatting errors
+      try {
+        const headerRange = sheet.getRange(1, 1, 1, Math.max(1, headerRow.length));
+        headerRange.setFontWeight('bold');
+        headerRange.setBackground('#1a73e8');
+        headerRange.setFontColor('#ffffff');
+      } catch (e) {
+        console.warn(`[Matrix] Header formatting failed: ${e.message}`);
+      }
+
+      // Get existing assessments for this grade/term/exam
+      const allAssessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS);
+      const filteredAssessments = allAssessments.filter(a =>
+        a.term === term && a.examType === examType
+      );
+
+      // Build student rows with existing scores
+      students.forEach(student => {
+        const row = [student.admissionNo || student.id, student.name];
+        finalSubjects.forEach(sub => {
+          const found = filteredAssessments.find(a =>
+            (String(a.studentId) === String(student.id) ||
+             String(a.studentAdmissionNo || '').toLowerCase() === String(student.admissionNo || '').toLowerCase()) &&
+            String(a.subject || '').toLowerCase() === String(sub || '').toLowerCase()
+          );
+          row.push(found ? found.score : '');
+        });
+        sheet.appendRow(row);
+      });
+
+      // Auto-resize columns
+      sheet.autoResizeColumns(1, headerRow.length);
+
+      return {
+        success: true,
+        sheetName: sheetName,
+        headers: finalSubjects.length,
+        students: students.length,
+        message: `Matrix sheet "${sheetName}" created with ${students.length} students and ${finalSubjects.length} subjects.`
+      };
+    }
+
+    if (action === 'SYNC_MATRIX') {
+      // param4 = sheetName of the matrix to sync back
+      const sheetName = param4;
+      if (!sheetName) return { success: false, error: 'No sheet name provided' };
+
+      console.log(`\n================== SYNC MATRIX START ==================`);
+      console.log(`[SYNC] Sheet name to sync: "${sheetName}"`);
+
+      const matrixSheet = ss.getSheetByName(sheetName);
+      if (!matrixSheet) {
+        console.log(`[SYNC] ERROR: Sheet not found: "${sheetName}"`);
+        return { success: false, error: `Sheet "${sheetName}" not found` };
+      }
+
+      console.log(`[SYNC] ✓ Matrix sheet found`);
+      
+      const matrixData = matrixSheet.getDataRange().getValues();
+      console.log(`[SYNC] Matrix sheet has ${matrixData.length} rows, ${matrixData[0]?.length || 0} columns`);
+      
+      if (!matrixData || matrixData.length < 2) {
+        console.log(`[SYNC] Matrix sheet is empty (less than 2 rows)`);
+        return { success: true, imported: 0, message: 'No data rows found' };
+      }
+
+      // Parse sheet name to get grade/term/examType
+      let grade = '', term = '', examType = '';
+      
+      const parts = sheetName.split('_');
+      if (parts.length >= 4 && parts[0] === 'MX') {
+        // Find term (T\d)
+        let termIdx = -1;
+        for (let i = 1; i < parts.length; i++) {
+          if (parts[i].match(/^T\d+$/)) {
+            termIdx = i;
+            break;
+          }
+        }
+        
+        if (termIdx > 1) {
+          grade = parts.slice(1, termIdx).join(' ');
+          term = parts[termIdx];
+          examType = parts.slice(termIdx + 1).join(' ');
+        }
+      }
+
+      // Fallback: if parsing failed
+      if (!grade || !term) {
+        const nameMatch = sheetName.match(/MX_(.+)_(T\d+)_(.+)/) || sheetName.match(/Grade_Assessments_(.+)_(T\d+)_(.+)/);
+        if (nameMatch) {
+          grade = nameMatch[1].replace(/_/g, ' ');
+          term = nameMatch[2];
+          examType = nameMatch[3];
+        } else {
+          console.log(`[SYNC] ERROR: Could not parse sheet name: ${sheetName}`);
+          return { success: false, error: `Could not parse sheet name: ${sheetName}` };
+        }
+      }
+
+      console.log(`[SYNC] Parsed sheet name: Grade="${grade}", Term="${term}", ExamType="${examType}"`);
+
+      // ⭐ USE THE PROVEN parseMatrixSheet FUNCTION
+      console.log(`[SYNC] Calling parseMatrixSheet()...`);
+      const parsedAssessments = parseMatrixSheet(matrixSheet, grade, term, examType, '2025/2026');
+      
+      console.log(`[SYNC] parseMatrixSheet returned ${parsedAssessments.length} assessments`);
+      
+      if (!parsedAssessments || parsedAssessments.length === 0) {
+        console.log(`[SYNC] No valid assessments parsed from matrix sheet`);
+        console.log(`[SYNC] This could mean:`);
+        console.log(`[SYNC]  - Matrix sheet format is wrong (check headers and data)`);
+        console.log(`[SYNC]  - Student IDs don't match system students`);
+        console.log(`[SYNC]  - Subject names don't match configured subjects`);
+        console.log(`[SYNC]  - Score values are not numbers`);
+        return { success: true, imported: 0, message: 'Matrix sheet has no valid data', assessments: [] };
+      }
+
+      // Get Assessments sheet
+      const assessmentsSheet = ss.getSheetByName(SHEET_NAMES.ASSESSMENTS);
+      if (!assessmentsSheet) {
+        console.log(`[SYNC] ERROR: Assessments sheet not found`);
+        return { success: false, error: 'Assessments sheet not found' };
+      }
+
+      console.log(`[SYNC] ✓ Assessments sheet found`);
+
+      // Get existing assessments
+      const allAssessments = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS, false);
+      console.log(`[SYNC] Assessments sheet currently has ${allAssessments.length} records`);
+      
+      // Merge: Update existing or add new
+      let updateCount = 0;
+      let createdCount = 0;
+      const finalAssessments = [...allAssessments]; // Start with all existing
+      
+      parsedAssessments.forEach(parsed => {
+        // Find if this assessment already exists (by studentId + subject + term + examType)
+        // LOOSE MATCHING to prevent duplicates if formatting varies
+        const parsedTerm = String(parsed.term || '').toLowerCase().trim();
+        const parsedExam = String(parsed.examType || '').toLowerCase().trim();
+        const parsedSub = String(parsed.subject || '').toLowerCase().trim();
+        const parsedSid = String(parsed.studentId || '').toLowerCase().trim();
+
+        const existingIdx = finalAssessments.findIndex(a => {
+          const aTerm = String(a.term || '').toLowerCase().trim();
+          const aExam = String(a.examType || '').toLowerCase().trim();
+          const aSub = String(a.subject || '').toLowerCase().trim();
+          const aSid = String(a.studentId || '').toLowerCase().trim();
+          const aAdm = String(a.studentAdmissionNo || '').toLowerCase().trim();
+
+          const sMatch = aSid === parsedSid || aAdm === parsedSid;
+          const subMatch = aSub === parsedSub;
+          const termMatch = aTerm === parsedTerm || aTerm.includes(parsedTerm) || parsedTerm.includes(aTerm);
+          const examMatch = aExam === parsedExam || aExam.includes(parsedExam) || parsedExam.includes(aExam);
+          
+          return sMatch && subMatch && termMatch && examMatch;
+        });
+        
+        if (existingIdx !== -1) {
+          // Update existing
+          finalAssessments[existingIdx] = { ...finalAssessments[existingIdx], ...parsed };
+          updateCount++;
+          console.log(`[SYNC]   UPDATED: ${parsed.studentName} (${parsed.studentId}) - ${parsed.subject} = ${parsed.score}`);
+        } else {
+          // Add new
+          finalAssessments.push(parsed);
+          createdCount++;
+          console.log(`[SYNC]   CREATED: ${parsed.studentName} (${parsed.studentId}) - ${parsed.subject} = ${parsed.score}`);
+        }
+      });
+
+      console.log(`[SYNC] Merge complete: ${updateCount} updated, ${createdCount} created`);
+
+      // Write back to Assessments sheet
+      if (updateCount > 0 || createdCount > 0) {
+        try {
+          // Clear and rewrite
+          assessmentsSheet.clearContents();
+          console.log(`[SYNC] ✓ Cleared Assessments sheet`);
+          
+          if (finalAssessments.length > 0) {
+            // Convert to array format for sheet
+            const rows = [];
+            rows.push(ASSESSMENT_HEADERS); // Add header row
+            
+            finalAssessments.forEach(a => {
+              const row = ASSESSMENT_HEADERS.map(header => a[header] || '');
+              rows.push(row);
+            });
+            
+            // Write all rows
+            assessmentsSheet.getRange(1, 1, rows.length, ASSESSMENT_HEADERS.length).setValues(rows);
+            console.log(`[SYNC] ✓ Wrote ${rows.length} rows to Assessments sheet (header + ${finalAssessments.length} data)`);
+          }
+          
+          // ⭐ CLEAR CACHE SO FRONTEND GETS FRESH DATA
+          dataCache.remove(`records_${SHEET_NAMES.ASSESSMENTS}`);
+          console.log(`[SYNC] ✓ Cache cleared for Assessments`);
+          
+          // Verify write
+          const verifyRead = getAllRecords(SHEET_NAMES.ASSESSMENTS, ASSESSMENT_HEADERS, false);
+          console.log(`[SYNC] ✓ VERIFICATION: Assessments sheet now has ${verifyRead.length} records`);
+          
+        } catch (writeErr) {
+          console.error(`[SYNC] ERROR writing to Assessments sheet:`, writeErr.message);
+          return { success: false, error: `Failed to write to Assessments sheet: ${writeErr.message}` };
+        }
+      }
+
+      console.log(`[SYNC] ✓ SYNC COMPLETE`);
+      console.log(`================== SYNC MATRIX END ==================\n`);
+
+      return {
+        success: true,
+        imported: updateCount + createdCount,
+        sheetName: sheetName,
+        grade: grade,
+        term: term,
+        examType: examType,
+        assessments: finalAssessments,
+        message: `✓ Synced ${updateCount + createdCount} marks (${updateCount} updated, ${createdCount} created) from matrix sheet "${sheetName}"`
+      };
+    }
+
+    if (action === 'UPDATE_MATRIX_CELL') {
+      // param1=studentId, param2=subject, param3=score, param4=grade, param5=term, extra=examType
+      // This is called per-cell when clicking save in the matrix view - just write to Assessments sheet
+      return { success: true, message: 'Cell sync handled via addAssessment' };
+    }
+
+    if (action === 'LIST_MATRICES') {
+      const sheets = ss.getSheets();
+      const matrices = sheets
+        .filter(s => s.getName().startsWith('MX_') || s.getName().startsWith('Grade_Assessments_'))
+        .map(s => ({ name: s.getName(), rows: s.getLastRow() - 1 }));
+      return { success: true, matrices: matrices };
+    }
+
+    if (action === 'DELETE_MATRIX') {
+      const sheetName = param4;
+      if (!sheetName) return { success: false, error: 'No sheet name provided' };
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return { success: false, error: `Sheet "${sheetName}" not found` };
+      ss.deleteSheet(sheet);
+      return { success: true, message: `Deleted matrix sheet "${sheetName}"` };
+    }
+
+    return { success: false, error: `Unknown matrix action: ${action}` };
+  } catch (err) {
+    console.error('processMatrixRequest error:', err.message);
+    return { success: false, error: err.message };
+  }
 }

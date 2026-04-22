@@ -4,6 +4,7 @@ import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { googleSheetSync } from '../lib/googleSheetSync.js';
 import { PrintButtons } from './PrintButtons.js';
+import { AssessmentMatrix } from './AssessmentMatrix.js';
 
 const html = htm.bind(h);
 
@@ -74,6 +75,9 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     const [searchTerm, setSearchTerm] = useState('');
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [examTotal, setExamTotal] = useState(100);
+    
+    // View toggle: 'table' or 'matrix'
+    const [activeView, setActiveView] = useState('table');
 
     // Auto-select first available grade on mount or when grades change
     const [initialGradeSet, setInitialGradeSet] = useState(false);
@@ -88,7 +92,13 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
     const streams = data?.settings?.streams || [];
     
     // Get subjects ONLY for the selected grade
-    const allSubjects = selectedGrade ? Storage.getSubjectsForGrade(selectedGrade) : [];
+    const allSubjects = useMemo(() => {
+        if (!selectedGrade) return [];
+        const defaults = Storage.getSubjectsForGrade(selectedGrade) || [];
+        const rawCustom = data?.settings?.gradeSubjects?.[selectedGrade] || '';
+        const custom = rawCustom.split(',').map(s => s.trim()).filter(Boolean);
+        return [...new Set([...defaults, ...custom])];
+    }, [selectedGrade, data?.settings?.gradeSubjects]);
     
     // FOR TEACHERS: Only show their assigned subjects for their grades
     let availableSubjects;
@@ -173,14 +183,26 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
         const studentIdStr = String(studentId);
         const academicYear = data.settings?.academicYear || '2025/2026';
         
-        // Find existing assessment with better matching
-        const existing = data.assessments.find(a => 
-            (String(a.studentId) === studentIdStr || String(a.studentId) === String(studentId)) && 
-            a.subject === selectedSubject && 
-            a.term === selectedTerm && 
-            a.examType === selectedExamType &&
-            a.academicYear === academicYear
-        );
+        // Use LOOSE MATCHING to find existing record
+        const termToMatch = String(selectedTerm || '').toLowerCase().trim();
+        const examToMatch = String(selectedExamType || '').toLowerCase().trim();
+        const subjToMatch = String(selectedSubject || '').toLowerCase().trim();
+
+        const existing = data.assessments.find(a => {
+            const studentMatch = String(a.studentId) === studentIdStr || String(a.studentId) === String(studentId);
+            if (!studentMatch) return false;
+
+            const subjectMatch = String(a.subject || '').toLowerCase().trim() === subjToMatch;
+            if (!subjectMatch) return false;
+
+            const aTerm = String(a.term || '').toLowerCase().trim();
+            const aExam = String(a.examType || '').toLowerCase().trim();
+            
+            const termMatch = aTerm === termToMatch || aTerm.includes(termToMatch) || termToMatch.includes(aTerm);
+            const examMatch = aExam === examToMatch || aExam.includes(examToMatch) || examToMatch.includes(aExam);
+            
+            return termMatch && examMatch;
+        });
         
         // Remove existing and keep other assessments
         const otherAssessments = data.assessments.filter(a => 
@@ -575,71 +597,106 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                 `}
             </div>
 
-            <div class="flex flex-col md:flex-row flex-wrap gap-4 no-print">
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Grade</label>
-                    <select 
-                        class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[120px]"
-                        value=${selectedGrade}
-                        onChange=${(e) => { setSelectedGrade(e.target.value); setSelectedStream('ALL'); }}
-                    >
-                        ${gradesToUse.map(g => html`<option value=${g}>${g}</option>`)}
-                    </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Stream</label>
-                    <select 
-                        class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[100px]"
-                        value=${selectedStream}
-                        onChange=${(e) => setSelectedStream(e.target.value)}
-                    >
-                        <option value="ALL">All</option>
-                        ${streams.map(s => html`<option value=${s}>${s}</option>`)}
-                    </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Term</label>
-                    <select 
-                        class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[100px]"
-                        value=${selectedTerm}
-                        onChange=${(e) => setSelectedTerm(e.target.value)}
-                    >
-                        <option value="T1">Term 1</option>
-                        <option value="T2">Term 2</option>
-                        <option value="T3">Term 3</option>
-                    </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Exam Cycle</label>
-                    <select 
-                        class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[140px]"
-                        value=${selectedExamType}
-                        onChange=${(e) => setSelectedExamType(e.target.value)}
-                    >
-                        <option value="Opener">Opener (CAT 1)</option>
-                        <option value="Mid-Term">Mid-Term (CAT 2)</option>
-                        <option value="End-Term">End-Term Exam</option>
-                    </select>
-                </div>
-                <div class="flex flex-col gap-1 flex-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Subject</label>
-                    <select 
-                        class="p-3 bg-white border border-slate-200 rounded-xl outline-none w-full"
-                        value=${selectedSubject}
-                        onChange=${(e) => setSelectedSubject(e.target.value)}
-                    >
-                        ${subjects.map(s => html`<option value=${s}>${s}</option>`)}
-                    </select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Total Marks/Questions</label>
-                    <input 
-                        type="number"
-                        class="p-3 bg-blue-50 border-2 border-blue-200 rounded-xl outline-none w-24 font-bold text-blue-700"
-                        value=${examTotal}
-                        onInput=${(e) => setExamTotal(e.target.value)}
-                        placeholder="E.g. 100"
-                    />
+            <!-- View Tabs -->
+            <div class="flex gap-2 no-print border-b border-slate-200">
+                <button
+                    onClick=${() => setActiveView('table')}
+                    class="px-4 py-2 font-semibold text-sm transition-all ${activeView === 'table' 
+                        ? 'text-blue-600 border-b-2 border-blue-600' 
+                        : 'text-slate-500 hover:text-slate-700'}"
+                >
+                    📊 Table View
+                </button>
+                <button
+                    onClick=${() => setActiveView('matrix')}
+                    class="px-4 py-2 font-semibold text-sm transition-all ${activeView === 'matrix' 
+                        ? 'text-blue-600 border-b-2 border-blue-600' 
+                        : 'text-slate-500 hover:text-slate-700'}"
+                >
+                    🔳 Matrix View
+                </button>
+            </div>
+
+            <!-- Matrix View -->
+            ${activeView === 'matrix' && html`
+                <${AssessmentMatrix} 
+                    data=${data} 
+                    setData=${setData} 
+                    isAdmin=${isAdmin} 
+                    teacherSession=${teacherSession}
+                    allowedSubjects=${allowedSubjects}
+                    allowedGrades=${allowedGrades}
+                    allowedReligion=${allowedReligion}
+                />
+            `}
+
+            <!-- Table View -->
+            ${activeView === 'table' && html`
+                <div class="flex flex-col md:flex-row flex-wrap gap-4 no-print">
+                    <div class="flex flex-col gap-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Grade</label>
+                        <select 
+                            class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[120px]"
+                            value=${selectedGrade}
+                            onChange=${(e) => { setSelectedGrade(e.target.value); setSelectedStream('ALL'); }}
+                        >
+                            ${gradesToUse.map(g => html`<option value=${g}>${g}</option>`)}
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Stream</label>
+                        <select 
+                            class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[100px]"
+                            value=${selectedStream}
+                            onChange=${(e) => setSelectedStream(e.target.value)}
+                        >
+                            <option value="ALL">All</option>
+                            ${streams.map(s => html`<option value=${s}>${s}</option>`)}
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Term</label>
+                        <select 
+                            class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[100px]"
+                            value=${selectedTerm}
+                            onChange=${(e) => setSelectedTerm(e.target.value)}
+                        >
+                            <option value="T1">Term 1</option>
+                            <option value="T2">Term 2</option>
+                            <option value="T3">Term 3</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Exam Cycle</label>
+                        <select 
+                            class="p-3 bg-white border border-slate-200 rounded-xl outline-none min-w-[140px]"
+                            value=${selectedExamType}
+                            onChange=${(e) => setSelectedExamType(e.target.value)}
+                        >
+                            <option value="Opener">Opener (CAT 1)</option>
+                            <option value="Mid-Term">Mid-Term (CAT 2)</option>
+                            <option value="End-Term">End-Term Exam</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1 flex-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Subject</label>
+                        <select 
+                            class="p-3 bg-white border border-slate-200 rounded-xl outline-none w-full"
+                            value=${selectedSubject}
+                            onChange=${(e) => setSelectedSubject(e.target.value)}
+                        >
+                            ${subjects.map(s => html`<option value=${s}>${s}</option>`)}
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Total Marks/Questions</label>
+                        <input 
+                            type="number"
+                            class="p-3 bg-blue-50 border-2 border-blue-200 rounded-xl outline-none w-24 font-bold text-blue-700"
+                            value=${examTotal}
+                            onInput=${(e) => setExamTotal(e.target.value)}
+                            placeholder="E.g. 100"
+                        />
                 </div>
                 <div class="flex flex-col gap-1">
                     <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Quick Search</label>
@@ -662,15 +719,35 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                 ` : html`
                     <div class="divide-y divide-slate-50">
                         ${filteredStudents.map(student => {
-                            const assessment = data.assessments.find(a => 
-                                (String(a.studentId) === String(student.id) || 
-                                 String(a.studentId) === String(student.admissionNo) ||
-                                 a.studentAdmissionNo === student.admissionNo) && 
-                                a.subject === selectedSubject && 
-                                a.term === selectedTerm && 
-                                a.examType === selectedExamType &&
-                                a.academicYear === (data.settings?.academicYear || '2025/2026')
-                            );
+                            const academicYearStr = data.settings?.academicYear || '2025/2026';
+                            const studentIdStr = String(student.id || '');
+                            const studentAdmLower = String(student.admissionNo || '').toLowerCase();
+                            const selectedSubjectLower = (selectedSubject || '').toLowerCase();
+
+                            const assessment = data.assessments.find(a => {
+                                const studentMatch =
+                                    String(a.studentId) === studentIdStr ||
+                                    String(a.studentId).toLowerCase() === studentAdmLower ||
+                                    (a.studentAdmissionNo && String(a.studentAdmissionNo).toLowerCase() === studentAdmLower);
+                                if (!studentMatch) return false;
+
+                                const subjectMatch = String(a.subject || '').toLowerCase().trim() === selectedSubjectLower.trim();
+                                if (!subjectMatch) return false;
+
+                                // LOOSE MATCHING for Term/Exam
+                                const termToMatch = String(selectedTerm || '').toLowerCase().trim();
+                                const aTerm = String(a.term || '').toLowerCase().trim();
+                                const termMatch = aTerm === termToMatch || aTerm.includes(termToMatch) || termToMatch.includes(aTerm);
+                                if (!termMatch) return false;
+
+                                const examToMatch = String(selectedExamType || '').toLowerCase().trim();
+                                const aExam = String(a.examType || '').toLowerCase().trim();
+                                const examMatch = aExam === examToMatch || aExam.includes(examToMatch) || examToMatch.includes(aExam);
+                                if (!examMatch) return false;
+
+                                const yearMatch = !a.academicYear || a.academicYear === academicYearStr;
+                                return yearMatch;
+                            });
                             return html`
                                 <div key=${student.id} class="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
                                     <div>
@@ -859,6 +936,7 @@ export const Assessments = ({ data, setData, isAdmin, teacherSession, allowedSub
                 </div>
                 <p class="text-xs text-slate-400 mt-2">${data.assessments.length} total records</p>
             </div>
+            `}
         </div>
     `;
 };

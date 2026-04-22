@@ -4,7 +4,7 @@ import htm from 'htm';
 
 const html = htm.bind(h);
 
-export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMobileOpen, setIsMobileOpen, isAdmin, teacherSession, onOpenAuth }) => {
+export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMobileOpen, setIsMobileOpen, isAdmin, teacherSession, parentSession, onOpenAuth, onOpenParentAuth }) => {
     const [expandedGroups, setExpandedGroups] = useState(['academics']);
     const [lockedItems, setLockedItems] = useState(new Set());
 
@@ -20,10 +20,21 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
         adminOnlyItems.add('students');
     }
     const teacherAccessItems = new Set(['assessments', 'attendance', 'marklist', 'timetable', 'result-analysis', 'transport']);
+    const parentAccessItems = new Set(['parents-dashboard', 'school-calendar']);
 
-    const isAuthenticated = isAdmin || teacherSession;
+    const isAuthenticated = isAdmin || teacherSession || parentSession;
 
     const handleLinkClick = (id) => {
+        // If parent is logged in, they can only access parent items
+        if (parentSession && !isAdmin && !teacherSession) {
+            if (parentAccessItems.has(id)) {
+                setView(id);
+            } else {
+                alert('Parents can only access the Parent Dashboard and School Calendar.');
+            }
+            return;
+        }
+
         // Check if item requires login
         if (!isAuthenticated) {
             // Show locked state briefly
@@ -36,8 +47,12 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                 });
             }, 500);
             
-            // Open auth modal
-            if (onOpenAuth) onOpenAuth();
+            // Open relevant auth modal
+            if (parentAccessItems.has(id)) {
+                if (onOpenParentAuth) onOpenParentAuth();
+            } else {
+                if (onOpenAuth) onOpenAuth();
+            }
             return;
         }
 
@@ -119,6 +134,15 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                 { id: 'transport', label: 'Transport', icon: '🚌' },
                 { id: 'library', label: 'Library', icon: '📚' },
                 { id: 'archives', label: 'Archives', icon: '🗄️' },
+            ]
+        },
+        { 
+            id: 'parents', 
+            label: 'Parents Portal', 
+            icon: '👪',
+            items: [
+                { id: 'parents-dashboard', label: 'Parent Dashboard', icon: '🏠' },
+                { id: 'school-calendar', label: 'School Calendar', icon: '📆' },
             ]
         },
         { id: 'settings', label: 'Settings', icon: '⚙️', adminOnly: true },
@@ -237,14 +261,14 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
 
             <div class="p-4 border-t border-slate-900 mt-auto">
                 <div class=${`flex items-center ${isMini ? 'justify-center' : 'gap-3'}`}>
-                    <div class="w-8 h-8 rounded-full ${isAuthenticated ? 'bg-green-600' : 'bg-slate-800'} flex items-center justify-center font-bold text-xs">
-                        ${isAuthenticated ? (isAdmin ? 'AD' : (teacherSession?.name?.[0] || 'T')) : '?'}
+                    <div class="w-8 h-8 rounded-full ${isAuthenticated ? (isAdmin ? 'bg-indigo-600' : (teacherSession ? 'bg-green-600' : 'bg-orange-600')) : 'bg-slate-800'} flex items-center justify-center font-bold text-xs">
+                        ${isAuthenticated ? (isAdmin ? 'AD' : (teacherSession ? (teacherSession?.name?.[0] || 'T') : (parentSession?.studentName?.[0] || 'P'))) : '?'}
                     </div>
                     ${(!isMini || isMobileOpen) && html`
                         <div class="overflow-hidden">
                             ${isAuthenticated ? html`
-                                <p class="text-[10px] font-bold truncate">${isAdmin ? 'Administrator' : (teacherSession?.name || teacherSession?.username || 'Teacher')}</p>
-                                <p class="text-[8px] text-green-400">✓ Logged In</p>
+                                <p class="text-[10px] font-bold truncate">${isAdmin ? 'Administrator' : (teacherSession ? (teacherSession.name || teacherSession.username) : parentSession.parentName)}</p>
+                                <p class="text-[8px] ${teacherSession ? 'text-green-400' : 'text-orange-400'}">✓ ${teacherSession ? 'Teacher' : 'Parent'} Logged In</p>
                             ` : html`
                                 <p class="text-[10px] font-bold truncate text-slate-500">Guest</p>
                                 <p class="text-[8px] text-slate-600">Not logged in</p>
