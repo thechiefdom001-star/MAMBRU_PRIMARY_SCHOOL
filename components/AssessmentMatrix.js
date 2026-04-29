@@ -302,8 +302,11 @@ export const AssessmentMatrix = ({
         fetch(url.toString(), { method: 'GET', mode: 'cors' })
           .then(r => r.json())
           .then(res => {
-            if (res.success) console.log('[Matrix] Cell updated in Google Sheet');
-            else console.warn('[Matrix] Cell update failed:', res.error);
+            if (res && res.success) console.log('[Matrix] Cell updated in Google Sheet');
+            else console.warn('[Matrix] Cell update failed:', res?.error || 'Unknown error');
+          })
+          .catch(err => {
+            console.warn('[Matrix] Cell update error:', err.message);
           });
       } catch (e) {
         console.warn('[Matrix] Dynamic update error:', e.message);

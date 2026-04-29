@@ -41,7 +41,8 @@ const SHEET_NAMES = {
   BACKUP_METADATA: 'Backup_Metadata',  // Track backups
   SYNC_STATUS: 'SyncStatus',  // Track sync operations
   PARENTS: 'Parents',
-  CALENDAR: 'Calendar'
+  CALENDAR: 'Calendar',
+  SETTINGS: 'Settings'  // For app settings (fee structures, etc.)
 };
 
 // Rate limiting configuration
@@ -85,6 +86,7 @@ const BACKUP_METADATA_HEADERS = ['backupName', 'sheetName', 'createdAt', 'record
 const SYNC_STATUS_HEADERS = ['lastSyncTime', 'syncType', 'recordCount', 'status', 'errorMessage'];
 const PARENT_HEADERS = ['id', 'admissionNo', 'name', 'contact', 'email', 'createdAt', 'lastLogin'];
 const CALENDAR_HEADERS = ['id', 'title', 'start', 'end', 'type', 'details', 'term', 'academicYear'];
+const SETTINGS_HEADERS = ['key', 'value', 'updatedAt', 'updatedBy'];
 
 // Cache for frequently accessed data
 const dataCache = CacheService.getScriptCache();
@@ -117,7 +119,8 @@ function initializeSheets() {
     { name: SHEET_NAMES.BACKUP_METADATA, headers: BACKUP_METADATA_HEADERS },
     { name: SHEET_NAMES.SYNC_STATUS, headers: SYNC_STATUS_HEADERS },
     { name: SHEET_NAMES.PARENTS, headers: PARENT_HEADERS },
-    { name: SHEET_NAMES.CALENDAR, headers: CALENDAR_HEADERS }
+    { name: SHEET_NAMES.CALENDAR, headers: CALENDAR_HEADERS },
+    { name: SHEET_NAMES.SETTINGS, headers: SETTINGS_HEADERS }
   ];
   
   sheetsConfig.forEach(config => {
@@ -1304,6 +1307,115 @@ function loginParent(admissionNo, studentName) {
 }
 
 
+// ==================== SETTINGS MANAGEMENT ====================
+
+function getSettings() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+
+    if (!settingsSheet) {
+      return { success: true, settings: {} };
+    }
+
+    const data = settingsSheet.getDataRange().getValues();
+    const settings = {};
+
+    for (let i = 1; i < data.length; i++) {
+      const key = String(data[i][0] || '').trim();
+      const value = data[i][1];
+
+      if (key) {
+        // Try to parse JSON values
+        try {
+          settings[key] = JSON.parse(value);
+        } catch (e) {
+          settings[key] = value;
+        }
+      }
+    }
+
+    return { success: true, settings: settings };
+  } catch (error) {
+    console.error('getSettings error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+function setSettings(settings, updatedBy = 'admin') {
+  try {
+    console.log('[setSettings] Called with settings keys:', Object.keys(settings));
+    console.log('[setSettings] feeStructures:', settings.feeStructures ? JSON.stringify(settings.feeStructures).substring(0, 500) : 'undefined');
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+
+    if (!settingsSheet) {
+      settingsSheet = ss.insertSheet(SHEET_NAMES.SETTINGS);
+      settingsSheet.appendRow(SETTINGS_HEADERS);
+      const headerRange = settingsSheet.getRange(1, 1, 1, SETTINGS_HEADERS.length);
+      headerRange.setFontWeight('bold');
+      headerRange.setBackground('#4285f4');
+      headerRange.setFontColor('#ffffff');
+    }
+
+    const lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000);
+
+      const now = new Date().toISOString();
+      const existingData = settingsSheet.getDataRange().getValues();
+      const existingKeys = new Map();
+
+      console.log('[setSettings] Existing rows:', existingData.length);
+
+      // Build map of existing keys
+      for (let i = 1; i < existingData.length; i++) {
+        const key = String(existingData[i][0] || '').trim();
+        if (key) {
+          existingKeys.set(key, i + 1);
+        }
+      }
+
+      console.log('[setSettings] Existing keys:', Array.from(existingKeys.keys()));
+
+      // Update or add each setting
+      for (const [key, value] of Object.entries(settings)) {
+        const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        const rowIndex = existingKeys.get(key);
+
+        console.log('[setSettings] Processing key:', key, 'value length:', valueStr.length);
+
+        if (rowIndex) {
+          // Update existing row
+          settingsSheet.getRange(rowIndex, 2).setValue(valueStr);
+          settingsSheet.getRange(rowIndex, 3).setValue(now);
+          settingsSheet.getRange(rowIndex, 4).setValue(updatedBy);
+          console.log('[setSettings] Updated row:', rowIndex);
+        } else {
+          // Add new row
+          settingsSheet.appendRow([key, valueStr, now, updatedBy]);
+          console.log('[setSettings] Appended new row for:', key);
+        }
+      }
+
+      dataCache.remove('records_Settings');
+
+      console.log('[setSettings] Success - total settings processed:', Object.keys(settings).length);
+      return { success: true, message: 'Settings updated successfully' };
+    } catch (lockError) {
+      console.error('[setSettings] Lock error:', lockError);
+      return { success: false, error: 'Lock error: ' + lockError.message };
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (error) {
+    console.error('[setSettings] Error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+
 // ==================== BACKUP SYSTEM ====================
 
 function createBackup(sheetName) {
@@ -2094,10 +2206,7 @@ function getHeadersForSheet(sheetName) {
  */
 function doOptions(e) {
   return ContentService.createTextOutput('')
-    .setMimeType(ContentService.MimeType.TEXT)
-    .addHeader('Access-Control-Allow-Origin', '*')
-    .addHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    .addHeader('Access-Control-Allow-Headers', 'Content-Type');
+    .setMimeType(ContentService.MimeType.TEXT);
 }
 
 function doGet(e) {
@@ -2437,8 +2546,13 @@ function doGet(e) {
           teachers: getAllRecords(SHEET_NAMES.TEACHERS, TEACHER_HEADERS),
           staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
           payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS),
-          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS, false)
+          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS, false),
+          settings: getSettings().settings || {}
         };
+        break;
+
+      case 'getSettings':
+        response = getSettings();
         break;
         
       case 'getCalendar':
@@ -3128,8 +3242,16 @@ function doPost(e) {
           staff: getAllRecords(SHEET_NAMES.STAFF, STAFF_HEADERS),
           payments: getAllRecords(SHEET_NAMES.PAYMENTS, PAYMENT_HEADERS),
           parents: getAllRecords(SHEET_NAMES.PARENTS, PARENT_HEADERS),
-          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS)
+          calendar: getAllRecords(SHEET_NAMES.CALENDAR, CALENDAR_HEADERS),
+          settings: getSettings().settings || {}
         };
+        break;
+
+      case 'setSettings':
+        console.log('[doPost] setSettings called with data:', JSON.stringify(data));
+        console.log('[doPost] data.settings keys:', data.settings ? Object.keys(data.settings) : 'undefined');
+        console.log('[doPost] data.settings.feeStructures:', data.settings?.feeStructures?.length || 0);
+        response = setSettings(data.settings, data.updatedBy || 'admin');
         break;
         
       case 'registerTeacher':
@@ -3422,6 +3544,7 @@ function processMatrixRequest(action, param1, param2, param3, param4, param5) {
       // Header row: Admission No, Name, [subjects...]
       const headerRow = ['Admission No', 'Name', ...finalSubjects];
       console.log(`[Matrix] Writing headers with ${finalSubjects.length} subjects: ${JSON.stringify(headerRow.slice(0, 5))}...`);
+      console.log(`[Matrix] Full header row:`, headerRow);
       sheet.appendRow(headerRow);
 
       // Header formatting - wrap in try catch to prevent total failure on formatting errors
@@ -3439,9 +3562,11 @@ function processMatrixRequest(action, param1, param2, param3, param4, param5) {
       const filteredAssessments = allAssessments.filter(a =>
         a.term === term && a.examType === examType
       );
+      console.log(`[Matrix] Found ${filteredAssessments.length} assessments for ${term} ${examType}`);
 
       // Build student rows with existing scores
-      students.forEach(student => {
+      console.log(`[Matrix] Building ${students.length} student rows...`);
+      students.forEach((student, idx) => {
         const row = [student.admissionNo || student.id, student.name];
         finalSubjects.forEach(sub => {
           const found = filteredAssessments.find(a =>
@@ -3451,8 +3576,10 @@ function processMatrixRequest(action, param1, param2, param3, param4, param5) {
           );
           row.push(found ? found.score : '');
         });
+        console.log(`[Matrix] Student ${idx + 1}/${students.length}: ${student.name} - Row:`, row);
         sheet.appendRow(row);
       });
+      console.log(`[Matrix] All student rows appended`);
 
       // Auto-resize columns
       sheet.autoResizeColumns(1, headerRow.length);

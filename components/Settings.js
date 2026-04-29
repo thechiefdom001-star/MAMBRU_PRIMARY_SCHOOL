@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { Storage } from '../lib/storage.js';
 import { PrintButtons } from './PrintButtons.js';
+import { googleSheetSync } from '../lib/googleSheetSync.js';
 
 const html = htm.bind(h);
 
@@ -56,17 +57,72 @@ export const Settings = ({ data, setData }) => {
         const newStructures = (settings.feeStructures || []).map(f => 
             f.grade === grade ? { ...f, [field]: Number(val) } : f
         );
+        const newSettings = { ...settings, feeStructures: newStructures };
         setData({
             ...data,
-            settings: { ...settings, feeStructures: newStructures }
+            settings: newSettings
         });
+
+        // Auto-sync to Google if configured
+        if (data.settings?.googleScriptUrl) {
+            googleSheetSync.setSettings(newSettings);
+            googleSheetSync.pushSettings(newSettings, 'admin').catch(err => {
+                console.error('[Settings] Auto-sync failed:', err);
+            });
+        }
     };
 
-    const handleUpdateProfile = () => {
+    const handleUpdateProfile = async () => {
         // Apply local settings to global data when saving
         setUpdating(true);
-        setData({ ...data, settings: { ...settings } });
+        const newSettings = { ...settings };
+        setData({ ...data, settings: newSettings });
+
+        // Auto-push to Google if URL is configured
+        if (newSettings.googleScriptUrl) {
+            try {
+                googleSheetSync.setSettings(newSettings);
+                await googleSheetSync.pushSettings(newSettings, 'admin');
+                console.log('[Settings] Auto-pushed to Google after saving profile');
+            } catch (err) {
+                console.error('[Settings] Auto-push failed:', err);
+            }
+        }
+
         setTimeout(() => setUpdating(false), 1000);
+    };
+
+    const handlePushSettingsToGoogle = async () => {
+        if (!data.settings?.googleScriptUrl) {
+            alert('Google Sheet not configured. Please add the URL in Settings > Google Sheet Sync.');
+            return;
+        }
+
+        console.log('[Settings Push] data.settings keys:', Object.keys(data.settings));
+        console.log('[Settings Push] feeStructures count:', data.settings.feeStructures?.length || 0);
+        console.log('[Settings Push] feeStructures grades:', data.settings.feeStructures?.map(f => f.grade) || []);
+
+        const confirmed = confirm('Push settings to Google Sheet?\n\nThis will update fee structures and other settings for all admins.\nContinue?');
+        if (!confirmed) return;
+
+        setUpdating(true);
+        try {
+            googleSheetSync.setSettings(data.settings);
+            const result = await googleSheetSync.pushSettings(data.settings, 'admin');
+
+            console.log('[Settings Push] Result:', result);
+
+            if (result.success) {
+                alert('✅ Settings pushed to Google Sheet successfully!\n\nAll admins will see the updated fee structures on next sync.');
+            } else {
+                alert('❌ Failed to push settings: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            console.error('[Settings Push] Error:', error);
+            alert('❌ Error pushing settings: ' + error.message);
+        } finally {
+            setUpdating(false);
+        }
     };
 
     const handleImageUpload = async (e, field) => {
@@ -515,11 +571,21 @@ export const Settings = ({ data, setData }) => {
                                                             >
                                                                 Edit
                                                             </button>
-                                                            <button 
+                                                            <button
                                                                 onClick=${() => {
                                                                     if (confirm('Delete this fee structure?')) {
-                                                                        const newData = { ...data, settings: { ...settings, feeStructures: settings.feeStructures.filter(f => f.grade !== fee.grade) }};
+                                                                        const newFeeStructures = settings.feeStructures.filter(f => f.grade !== fee.grade);
+                                                                        const newSettings = { ...settings, feeStructures: newFeeStructures };
+                                                                        const newData = { ...data, settings: newSettings };
                                                                         setData(newData);
+
+                                                                        // Auto-sync to Google if configured
+                                                                        if (data.settings?.googleScriptUrl) {
+                                                                            googleSheetSync.setSettings(newSettings);
+                                                                            googleSheetSync.pushSettings(newSettings, 'admin').catch(err => {
+                                                                                console.error('[Settings] Auto-sync failed:', err);
+                                                                            });
+                                                                        }
                                                                     }
                                                                 }}
                                                                 class="text-red-500 text-[10px] font-bold px-2 py-1 hover:bg-red-50 rounded"
@@ -635,14 +701,23 @@ export const Settings = ({ data, setData }) => {
                                                         activityFees: 0, tieAndBadge: 0,
                                                         academicSupport: 0, pta: 0
                                                     };
+                                                    const newSettings = {
+                                                        ...settings,
+                                                        feeStructures: [...settings.feeStructures, newStructure],
+                                                        grades: settings.grades.includes(gradeName.toUpperCase()) ? settings.grades : [...settings.grades, gradeName.toUpperCase()]
+                                                    };
                                                     setData({
                                                         ...data,
-                                                        settings: {
-                                                            ...settings,
-                                                            feeStructures: [...settings.feeStructures, newStructure],
-                                                            grades: settings.grades.includes(gradeName.toUpperCase()) ? settings.grades : [...settings.grades, gradeName.toUpperCase()]
-                                                        }
+                                                        settings: newSettings
                                                     });
+
+                                                    // Auto-sync to Google if configured
+                                                    if (data.settings?.googleScriptUrl) {
+                                                        googleSheetSync.setSettings(newSettings);
+                                                        googleSheetSync.pushSettings(newSettings, 'admin').catch(err => {
+                                                            console.error('[Settings] Auto-sync failed:', err);
+                                                        });
+                                                    }
                                                 }}
                                                 class="w-full py-2 mt-3 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700"
                                             >
@@ -716,15 +791,24 @@ export const Settings = ({ data, setData }) => {
                                                         ${isHidden ? 'Show' : 'Hide'}
                                                     </button>
                                                 </div>
-                                                <input 
-                                                    type="number" 
+                                                <input
+                                                    type="number"
                                                     class="w-full p-2 bg-slate-50 rounded-lg text-sm font-bold border border-slate-200 focus:border-blue-500 outline-none"
                                                     value=${feeStructure[col.key] || 0}
                                                     onInput=${(e) => {
-                                                        const newStructures = settings.feeStructures.map(f => 
+                                                        const newStructures = settings.feeStructures.map(f =>
                                                             f.grade === editingFeeGrade ? { ...f, [col.key]: Number(e.target.value) } : f
                                                         );
-                                                        setData({ ...data, settings: { ...settings, feeStructures: newStructures } });
+                                                        const newSettings = { ...settings, feeStructures: newStructures };
+                                                        setData({ ...data, settings: newSettings });
+
+                                                        // Auto-sync to Google if configured
+                                                        if (data.settings?.googleScriptUrl) {
+                                                            googleSheetSync.setSettings(newSettings);
+                                                            googleSheetSync.pushSettings(newSettings, 'admin').catch(err => {
+                                                                console.error('[Settings] Auto-sync failed:', err);
+                                                            });
+                                                        }
                                                     }}
                                                 />
                                             </div>
@@ -1330,6 +1414,18 @@ export const Settings = ({ data, setData }) => {
                         >
                             ${updating ? '✓ Saved' : 'Save Google Sync Settings'}
                         </button>
+                        <button 
+                            onClick=${handlePushSettingsToGoogle}
+                            disabled=${updating}
+                            class="w-full py-3 bg-orange-500 text-white rounded-xl font-bold transition-all shadow-lg hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            ${updating ? '⏳ Pushing...' : '📤 Push Settings to Google'}
+                        </button>
+                        <div class="bg-orange-50 p-4 rounded-xl border border-orange-200">
+                            <p class="text-xs font-bold text-orange-800 mb-2">💡 Settings Sync:</p>
+                            <p class="text-[10px] text-orange-700">Push fee structures and other settings to Google Sheet to share with all admins.</p>
+                            <p class="text-[10px] text-orange-700">All admins will see updated settings on their next sync.</p>
+                        </div>
                     </div>
                 </div>
             </div>

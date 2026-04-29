@@ -177,12 +177,13 @@ const App = () => {
     const [googleSyncStatus, setGoogleSyncStatus] = useState('');
     const [showForcePushModal, setShowForcePushModal] = useState(false);
     const [forcePushSelection, setForcePushSelection] = useState({
-        students: true,
-        assessments: true,
-        payments: true,
-        teachers: true,
-        staff: true,
-        attendance: true
+        students: false,
+        assessments: false,
+        payments: false,
+        teachers: false,
+        staff: false,
+        attendance: false,
+        settings: false
     });
     const [deviceId, setDeviceId] = useState('');
 
@@ -380,36 +381,44 @@ const App = () => {
     const SYNC_COOLDOWN = 30000; // 30 seconds minimum between syncs
 
     // Force push selected local data to Google based on user selection
-    const forcePushToGoogle = useCallback(async () => {
+    const forcePushToGoogle = useCallback(async (selection) => {
         console.log('[ForcePush] Starting - URL:', data?.settings?.googleScriptUrl);
-        
+
         if (!data?.settings?.googleScriptUrl) {
             alert("Google Sheet not configured");
             console.error('[ForcePush] No URL found in settings:', data?.settings);
             return;
         }
-        
+
         // Store URL to verify it doesn't get lost
         const originalUrl = data.settings.googleScriptUrl;
         console.log('[ForcePush] Original URL stored:', originalUrl);
-        
-        // Close modal and start pushing
+
+        // Use the selection passed from the modal button
+        const sel = selection || forcePushSelection;
+        console.log('[ForcePush] Selection state:', JSON.stringify(sel));
+        console.log('[ForcePush] sel.settings:', sel.settings);
+
+        // Close modal
         setShowForcePushModal(false);
-        
-        const sel = forcePushSelection;
+
         const studentCount = sel.students ? (data.students?.length || 0) : 0;
         const assessmentCount = sel.assessments ? (data.assessments?.length || 0) : 0;
         const paymentCount = sel.payments ? (data.payments?.length || 0) : 0;
         const teacherCount = sel.teachers ? (data.teachers?.length || 0) : 0;
         const staffCount = sel.staff ? (data.staff?.length || 0) : 0;
-        
+        const settingsCount = sel.settings ? 'All' : 0;
+
         let selectedItems = [];
         if (sel.students) selectedItems.push(`${studentCount} Students`);
         if (sel.assessments) selectedItems.push(`${assessmentCount} Assessments`);
         if (sel.payments) selectedItems.push(`${paymentCount} Payments`);
         if (sel.teachers) selectedItems.push(`${teacherCount} Teachers`);
         if (sel.staff) selectedItems.push(`${staffCount} Staff`);
-        
+        if (sel.settings) selectedItems.push(`Settings (fee structures, etc.)`);
+
+        console.log('[ForcePush] Selected items:', selectedItems);
+
         if (selectedItems.length === 0) {
             alert("Please select at least one data type to push.");
             return;
@@ -508,7 +517,7 @@ const App = () => {
             if (sel.staff) {
                 setGoogleSyncStatus(`📤 Pushing ${staffCount} staff...`);
                 console.log('=== FORCE PUSHING STAFF ===');
-                
+
                 for (const staff of (data.staff || [])) {
                     console.log('➕ Staff:', staff.name, staff.id);
                     const result = await googleSheetSync.pushStaff(staff);
@@ -519,7 +528,22 @@ const App = () => {
                     }
                 }
             }
-            
+
+            // ========== FORCE PUSH SETTINGS ==========
+            if (sel.settings) {
+                setGoogleSyncStatus(`📤 Pushing settings (fee structures, etc.)...`);
+                console.log('=== FORCE PUSHING SETTINGS ===');
+
+                const result = await googleSheetSync.pushSettings(data.settings, 'admin');
+                if (result.success) {
+                    totalAdded++;
+                    console.log('✅ Settings pushed successfully');
+                } else {
+                    totalFailed++;
+                    console.warn('❌ Failed to push settings:', result.error);
+                }
+            }
+
             console.log('=== FORCE PUSH COMPLETE ===');
             console.log('Total Added:', totalAdded, 'Total Failed:', totalFailed);
             
@@ -690,13 +714,25 @@ const App = () => {
                     if (result.staff?.length > 0) {
                         merged = Storage.mergeData(merged, { staff: result.staff }, 'staff');
                     }
-                    
+
+                    // Merge settings (Google settings OVERRIDE local settings for fee structures, etc.)
+                    if (result.settings && Object.keys(result.settings).length > 0) {
+                        console.log('🔄 Overriding local settings with Google settings:', Object.keys(result.settings));
+                        // Google settings override local settings
+                        merged.settings = {
+                            ...result.settings,
+                            // Preserve googleScriptUrl from local if Google doesn't have it
+                            googleScriptUrl: result.settings.googleScriptUrl || merged.settings.googleScriptUrl
+                        };
+                    }
+
                     console.log('✅ After merge - preserved local data:', {
                         students: merged?.students?.length,
                         payments: merged?.payments?.length,
-                        assessments: merged?.assessments?.length
+                        assessments: merged?.assessments?.length,
+                        settings: Object.keys(merged?.settings || {}).length
                     });
-                    
+
                     setData(merged);
                     Storage.save(merged);
                     setGoogleSyncStatus(`✓ Synced! ${merged.students?.length || 0} students, ${merged.payments?.length || 0} payments (local + Google)`);
@@ -766,10 +802,21 @@ const App = () => {
                 )
             );
 
-            pulledData.settings = {
-                ...pulledData.settings,
-                googleScriptUrl: data.settings.googleScriptUrl
-            };
+            // Override local settings with Google settings (for fee structures, etc.)
+            if (result.settings && Object.keys(result.settings).length > 0) {
+                console.log('🔄 Overriding local settings with Google settings on pull:', Object.keys(result.settings));
+                pulledData.settings = {
+                    ...result.settings,
+                    // Preserve googleScriptUrl from local if Google doesn't have it
+                    googleScriptUrl: result.settings.googleScriptUrl || data.settings.googleScriptUrl
+                };
+            } else {
+                // Fallback to preserving local settings if Google has none
+                pulledData.settings = {
+                    ...pulledData.settings,
+                    googleScriptUrl: data.settings.googleScriptUrl
+                };
+            }
 
             console.log('Google pull complete:', {
                 students: pulledData.students?.length,
@@ -1529,8 +1576,8 @@ const App = () => {
                             </label>
                             
                             <label class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-red-50 transition-colors">
-                                <input 
-                                    type="checkbox" 
+                                <input
+                                    type="checkbox"
                                     checked=${forcePushSelection.staff}
                                     onChange=${e => setForcePushSelection({...forcePushSelection, staff: e.target.checked})}
                                     class="w-5 h-5 text-red-600 rounded focus:ring-red-500"
@@ -1538,6 +1585,22 @@ const App = () => {
                                 <div class="flex-1">
                                     <span class="font-bold text-slate-700">👷 Staff</span>
                                     <span class="text-xs text-slate-400 ml-2">(${data.staff?.length || 0} records)</span>
+                                </div>
+                            </label>
+
+                            <label class="flex items-center gap-3 p-3 bg-orange-50 rounded-xl cursor-pointer hover:bg-orange-100 transition-colors border border-orange-200">
+                                <input
+                                    type="checkbox"
+                                    checked=${forcePushSelection.settings}
+                                    onChange=${e => {
+                                        console.log('[ForcePush Modal] Settings checkbox changed:', e.target.checked);
+                                        setForcePushSelection({...forcePushSelection, settings: e.target.checked});
+                                    }}
+                                    class="w-5 h-5 text-orange-600 rounded focus:ring-orange-500"
+                                />
+                                <div class="flex-1">
+                                    <span class="font-bold text-slate-700">⚙️ Settings</span>
+                                    <span class="text-xs text-slate-400 ml-2">(fee structures, school info, etc.)</span>
                                 </div>
                             </label>
                         </div>
@@ -1549,8 +1612,8 @@ const App = () => {
                             >
                                 Cancel
                             </button>
-                            <button 
-                                onClick=${forcePushToGoogle}
+                            <button
+                                onClick=${() => forcePushToGoogle(forcePushSelection)}
                                 class="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 transition-colors"
                             >
                                 🚀 Push Now
