@@ -53,6 +53,7 @@ export const TeacherAuth = ({ settings, data = {}, setData = () => {}, onLogin, 
     
     // Grade-based subjects mapping
     const gradeSubjects = {
+        'BABY CLASS': ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'],
         'PP1': ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'],
         'PP2': ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'],
         'GRADE 1': ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'],
@@ -69,7 +70,7 @@ export const TeacherAuth = ({ settings, data = {}, setData = () => {}, onLogin, 
         'GRADE 12': ['English', 'Kiswahili', 'Mathematics', 'CSL', 'Biology', 'Chemistry', 'Physics', 'Agriculture', 'Computer Studies', 'History and Citizenship', 'Geography', 'CRE', 'IRE', 'Accounting', 'Economics', 'Fine Arts', 'Music and Dance', 'Sports Science', 'Business Studies']
     };
     
-    const allGrades = ['PP1', 'PP2', 'GRADE 1', 'GRADE 2', 'GRADE 3', 'GRADE 4', 'GRADE 5', 'GRADE 6', 'GRADE 7', 'GRADE 8', 'GRADE 9', 'GRADE 10', 'GRADE 11', 'GRADE 12'];
+    const allGrades = ['BABY CLASS', 'PP1', 'PP2', 'GRADE 1', 'GRADE 2', 'GRADE 3', 'GRADE 4', 'GRADE 5', 'GRADE 6', 'GRADE 7', 'GRADE 8', 'GRADE 9', 'GRADE 10', 'GRADE 11', 'GRADE 12'];
     
     // Get available subjects based on selected grades
     const getAvailableSubjects = () => {

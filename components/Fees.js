@@ -169,6 +169,7 @@ export const Fees = ({ data, setData, isAdmin, teacherSession }) => {
         const newPayment = {
             id: 'PAY-' + Date.now(),
             studentId: selectedStudentId,
+            studentName: student.name,
             gradeAtPayment: student.grade,
             amount: totalAmount,
             items: { ...paymentItems },

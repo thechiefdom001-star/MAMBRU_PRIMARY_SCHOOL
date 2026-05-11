@@ -1413,7 +1413,7 @@ const App = () => {
                     onOpenParentAuth=${() => setShowParentAuth(true)}
                 />
                 <main class="flex-1 overflow-y-auto no-scrollbar pb-20 md:pb-0">
-                    <div class="max-w-6xl mx-auto p-4 md:p-8">
+                    <div class="w-full mx-auto p-4 md:p-8">
                         ${!isAuthenticated ? html`
                             <div class="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-4">
                                 <div class="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-5xl">

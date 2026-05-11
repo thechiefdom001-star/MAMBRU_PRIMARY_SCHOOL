@@ -157,8 +157,8 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
             
             <div class=${`p-4 border-b border-slate-900 flex items-center ${isMini ? 'justify-center' : 'justify-between'}`}>
                 ${(!isMini || isMobileOpen) && html`
-                    <span class="font-black text-xs uppercase tracking-tighter text-slate-500">Navigation</span>
-                    ${!isAuthenticated && html`<span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Locked</span>`}
+                    <span class="font-black text-sm uppercase tracking-tighter text-slate-500">Navigation</span>
+                    ${!isAuthenticated && html`<span class="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Locked</span>`}
                 `}
                 <button 
                     type="button"
@@ -188,7 +188,7 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                                     <div class="flex items-center">
                                         <span class=${`text-lg ${allLocked ? 'grayscale opacity-50' : ''}`}>${node.icon}</span>
                                         ${!isMini && html`
-                                            <span class="text-[10px] font-black uppercase tracking-widest ml-3">${node.label}</span>
+                                            <span class="text-sm font-black uppercase tracking-widest ml-3">${node.label}</span>
                                             ${allLocked && html`<span class="ml-2 text-[8px]">🔒</span>`}
                                         `}
                                     </div>
@@ -209,10 +209,10 @@ export const Sidebar = ({ currentView, setView, isCollapsed, setCollapsed, isMob
                                                         'text-slate-400 hover:bg-slate-800 hover:text-white'
                                                     }`}
                                                 >
-                                                    ${isLocked && html`<span class="text-[8px] mr-2">🔒</span>`}
-                                                    <span class="text-sm">${item.icon}</span>
-                                                    <span class="truncate text-xs font-medium ml-2">${item.label}</span>
-                                                    ${item.adminOnly && html`<span class="ml-auto text-[8px] bg-red-500/30 text-red-400 px-1 rounded">Admin</span>`}
+                                                    ${isLocked && html`<span class="text-xs mr-2">🔒</span>`}
+                                                    <span class="text-lg">${item.icon}</span>
+                                                    <span class="truncate text-base font-medium ml-2">${item.label}</span>
+                                                    ${item.adminOnly && html`<span class="ml-auto text-xs bg-red-500/30 text-red-400 px-1 rounded">Admin</span>`}
                                                 </button>
                                             `;
                                         })}

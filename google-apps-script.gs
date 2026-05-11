@@ -79,7 +79,7 @@ const ASSESSMENT_HEADERS = ['id', 'studentId', 'studentAdmissionNo', 'studentNam
 const ATTENDANCE_HEADERS = ['id', 'studentId', 'date', 'status', 'term', 'academicYear'];
 const TEACHER_HEADERS = ['id', 'name', 'contact', 'subjects', 'grades', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo', 'isClassTeacher', 'classTeacherGrade'];
 const STAFF_HEADERS = ['id', 'name', 'role', 'contact', 'employeeNo', 'nssfNo', 'shifNo', 'taxNo'];
-const PAYMENT_HEADERS = ['id', 'studentId', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt', 'voidedBy', 'voidReason'];
+const PAYMENT_HEADERS = ['id', 'studentId', 'studentName', 'amount', 'term', 'academicYear', 'date', 'receiptNo', 'method', 'reference', 'items', 'voided', 'voidedAt', 'voidedBy', 'voidReason'];
 const TEACHER_CREDENTIALS_HEADERS = ['username', 'passwordHash', 'teacherId', 'name', 'role', 'createdAt', 'lastLogin', 'subjects', 'grades', 'classTeacherGrade', 'religion'];
 const ACTIVITY_LOG_HEADERS = ['id', 'userId', 'userName', 'userRole', 'action', 'module', 'recordId', 'recordName', 'details', 'timestamp', 'ipAddress'];
 const BACKUP_METADATA_HEADERS = ['backupName', 'sheetName', 'createdAt', 'recordCount'];
@@ -1871,7 +1871,7 @@ function getDefaultSubjectsForGrade(grade) {
                            .replace(/CLASS/g, '')
                            .replace(/\s+/g, '');
   
-  if (normalized === 'PP1' || normalized === 'PP2' || gUpper.includes('PP1') || gUpper.includes('PP2')) {
+  if (gUpper === 'BABY CLASS' || normalized === 'PP1' || normalized === 'PP2' || gUpper.includes('PP1') || gUpper.includes('PP2')) {
     return ['Mathematics activities', 'Language activities', 'Literacy', 'Kiswahili', 'Environmental Activities', 'Creative Activities', 'Religious Education Activities'];
   } else if (gUpper === 'GRADE 1' || gUpper === 'GRADE 2' || gUpper === 'GRADE 3' || gUpper === '1' || gUpper === '2' || gUpper === '3') {
     return ['INDIGENOUS LANGUAGE ACTIVITIES', 'KISWAHILI/KSL ACTIVITIES', 'ENGLISH LANGUAGE ACTIVITIES', 'MATHEMATIC ACTIVITIES', 'RELIGIOUS EDUCATION ACTIVITIES', 'ENVIRONMENTAL ACTIVITIES', 'CREATIVE ART ACTIVITIES'];
@@ -3424,8 +3424,8 @@ function processMatrixRequest(action, param1, param2, param3, param4, param5) {
         // Strategy 3: Partial match (useful for "Grade 8" vs "GRADE8")
         const isPartialMatch = sGradeNorm.startsWith(searchGradeNorm) || searchGradeNorm.startsWith(sGradeNorm);
         // Strategy 4: Special handling for early years (PP1, PP2, BABY CLASS, NURSERY, etc.)
-        const isEarlyYears = (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2') && 
-                            (sGradeNorm === 'PP1' || sGradeNorm === 'PP2' || 
+        const isEarlyYears = (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2' || searchGradeNorm === 'BABYCLASS') && 
+                            (sGradeNorm === 'PP1' || sGradeNorm === 'PP2' || sGradeNorm === 'BABYCLASS' ||
                              sGrade.includes('BABY') || sGrade.includes('NURSERY') || 
                              sGrade.includes('RECEPTION') || sGrade.includes('KINDERGARTEN'));
 
@@ -3444,8 +3444,8 @@ function processMatrixRequest(action, param1, param2, param3, param4, param5) {
         });
       }
 
-      // FINAL RESCUE: If searching for PP1/PP2 and still getting 0, be very aggressive
-      if (students.length === 0 && (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2')) {
+      // FINAL RESCUE: If searching for PP1/PP2/BABY CLASS and still getting 0, be very aggressive
+      if (students.length === 0 && (searchGradeNorm === 'PP1' || searchGradeNorm === 'PP2' || searchGradeNorm === 'BABYCLASS')) {
         console.log(`[Matrix] FINAL RESCUE MODE for early years: ${searchGrade}...`);
         students = allStudents.filter(s => {
           const sGrad = String(s.grade || '').toUpperCase();

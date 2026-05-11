@@ -214,11 +214,25 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                 googleSheetSync.setSettings(settings);
                 const result = await googleSheetSync.fetchAll();
                 
-                
-                // Fetch recent activities from Log
-                const logResult = await googleSheetSync.getRecentActivities(10);
-                if (logResult) {
-                    setRecentActivities(logResult);
+                // Get recent payments instead of activities
+                if (result.success && result.payments) {
+                    const recentPayments = result.payments
+                        .filter(p => !p.voided && p.date)
+                        .sort((a, b) => new Date(b.date) - new Date(a.date))
+                        .slice(0, 10)
+                        .map(payment => ({
+                            id: payment.id,
+                            userName: payment.studentName || 'Unknown',
+                            action: 'ADD',
+                            module: 'Payments',
+                            recordId: payment.id,
+                            recordName: `Payment - ${payment.receiptNo || 'N/A'}`,
+                            details: `Amount: ${settings.currency} ${payment.amount}`,
+                            timestamp: payment.date,
+                            amount: payment.amount,
+                            receiptNo: payment.receiptNo
+                        }));
+                    setRecentActivities(recentPayments);
                 }
             } catch (error) {
                 console.warn('Dashboard refresh error:', error);
@@ -369,8 +383,8 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
             `}
 
             <div class="no-print">
-                <h1 class="text-3xl font-extrabold tracking-tight">System Overview</h1>
-                <p class="text-slate-500 mt-1">Welcome back to ${settings.schoolName || 'the portal'}.</p>
+                <h1 class="text-4xl font-extrabold tracking-tight">System Overview</h1>
+                <p class="text-slate-500 mt-1 text-lg">Welcome back to ${settings.schoolName || 'the portal'}.</p>
             </div>
 
             <!-- Horizontally scrollable panels on mobile -->
@@ -383,11 +397,12 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                 <div class="min-w-[160px] md:min-w-0 flex-1"><${StatCard} title="Assess" value=${assessments.length} subtitle="CBC Records" icon="📝" color="purple" /></div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Recent Fees Activity -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                    <h3 class="font-bold mb-4 flex items-center gap-2">
+                    <h3 class="font-bold mb-4 text-base flex items-center gap-2">
                         <span class="w-2 h-2 bg-blue-500 rounded-full"></span>
-                        Recent Activity
+                        Recent Fees Activity
                     </h3>
                     <div class="space-y-1">
                         ${(recentActivities || []).map((activity, idx) => html`
@@ -403,10 +418,10 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                                           activity.module === 'Students' ? '🎓' : '📝'}
                                     </div>
                                     <div class="flex-1 min-w-0">
-                                        <p class="font-bold text-[11px] md:text-xs text-slate-800 truncate">
+                                        <p class="font-bold text-xs md:text-sm text-slate-800 truncate">
                                             ${activity.recordName || (activity.details ? activity.details.split(':').pop().trim() : 'Record')}
                                         </p>
-                                        <p class="text-[9px] text-slate-400 capitalize">
+                                        <p class="text-sm text-slate-500 capitalize">
                                             ${activity.userName} • ${activity.action === 'ADD' ? 'added' : activity.action === 'UPDATE' ? 'updated' : activity.action.toLowerCase()} • ${new Date(activity.timestamp).toLocaleDateString()}
                                         </p>
                                     </div>
@@ -414,23 +429,24 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                                         ${activity.module === 'Payments' && html`
                                             <div class="mb-1">
                                                 <span class="text-green-600 font-black text-xs md:text-sm block leading-none">
-                                                    +${settings.currency} ${(payments.find(p => String(p.id) === String(activity.recordId))?.amount || 0).toLocaleString()}
+                                                    +${settings.currency} ${(activity.amount || 0).toLocaleString()}
                                                 </span>
-                                                <span class="text-[8px] text-slate-300 font-mono uppercase tracking-tighter">
-                                                    ${payments.find(p => String(p.id) === String(activity.recordId))?.receiptNo || 'N/A'}
+                                                <span class="text-sm text-slate-300 font-mono uppercase tracking-tighter">
+                                                    ${activity.receiptNo || 'N/A'}
                                                 </span>
                                             </div>
                                         `}
-                                        <span class="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                                        <span class="text-sm font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                                             ${activity.module}
                                         </span>
                                     </div>
                                 </div>
                             `)}
-                        ${recentActivities.length === 0 && html`<p class="text-center text-slate-300 py-4 text-sm font-medium italic">No recent activity found</p>`}
+                        ${recentActivities.length === 0 && html`<p class="text-center text-slate-300 py-4 text-sm font-medium italic">No recent fees activity found</p>`}
                     </div>
                 </div>
 
+                <!-- Student Enrollment per Grade -->
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                     <h3 class="font-bold mb-6 flex items-center gap-2">
                         <span class="w-2 h-2 bg-purple-500 rounded-full"></span>
@@ -476,8 +492,12 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                     </div>
                     ${totalStudents === 0 && html`<p class="text-center text-slate-300 py-12 text-sm">No enrollment data</p>`}
                 </div>
+            </div>
 
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2">
+            <!-- Full Width Section -->
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <!-- Fee Collection per Grade -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 md:col-span-2 xl:col-span-3">
                     <h3 class="font-bold mb-6 flex items-center gap-2">
                         <span class="w-2 h-2 bg-green-500 rounded-full"></span>
                         Fee Collection per Grade (${settings.currency})
@@ -524,7 +544,7 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
                 </div>
                 
                 <!-- Assessment Activity Component -->
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 md:col-span-2 xl:col-span-3">
                     <h3 class="font-bold mb-6 flex items-center gap-2">
                         <span class="w-2 h-2 bg-purple-500 rounded-full"></span>
                         Assessment Activity
@@ -565,7 +585,7 @@ export const Dashboard = ({ data, setData, googleSyncStatus, isAdmin, teacherSes
 
                 <!-- Activity Log -->
                 ${isAdmin && html`
-                    <div class="lg:col-span-2">
+                    <div class="md:col-span-2 xl:col-span-3">
                         <${ActivityLog} 
                             settings=${settings} 
                             isAdmin=${isAdmin}

@@ -372,7 +372,7 @@ export const Attendance = ({ data, setData, isAdmin, teacherSession, allowedGrad
 
             ${showPrintModal && html`
                 <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:p-0 print:bg-white">
-                    <div class="bg-white rounded-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-auto print:max-h-none print:p-0">
+                    <div class="bg-white rounded-2xl p-6 max-w-[95vw] w-full max-h-[90vh] overflow-auto print:max-h-none print:p-0">
                         <div class="flex justify-between items-center mb-4 no-print">
                             <h3 class="text-lg font-bold">Class Attendance Register</h3>
                             <button onClick=${() => setShowPrintModal(false)} class="text-slate-500 hover:text-slate-700">✕</button>
