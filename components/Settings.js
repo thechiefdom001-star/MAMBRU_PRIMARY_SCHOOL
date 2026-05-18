@@ -31,6 +31,7 @@ export const Settings = ({ data, setData }) => {
         archives: true
     });
     const [clearExisting, setClearExisting] = useState(false);
+    const [fetchingSettings, setFetchingSettings] = useState(false);
     
     const [localSettings, setLocalSettings] = useState(data.settings);
     useEffect(() => {
@@ -125,6 +126,52 @@ export const Settings = ({ data, setData }) => {
         }
     };
 
+    const handleFetchSettingsFromGoogle = async () => {
+        if (!settings.googleScriptUrl) {
+            alert('Please enter the Google Sheet URL first');
+            return;
+        }
+
+        setFetchingSettings(true);
+        try {
+            googleSheetSync.setSettings(settings);
+            const result = await googleSheetSync.fetchSettings();
+
+            console.log('[Settings Fetch] Result:', result);
+
+            if (result.success && result.settings) {
+                // Merge fetched settings with current settings, preserving some local values
+                const mergedSettings = {
+                    ...data.settings,
+                    ...result.settings,
+                    googleScriptUrl: settings.googleScriptUrl, // Keep the URL
+                    theme: data.settings?.theme, // Keep theme preference
+                    primaryColor: data.settings?.primaryColor, // Keep color preference
+                    secondaryColor: data.settings?.secondaryColor
+                };
+
+                setData({
+                    ...data,
+                    settings: mergedSettings
+                });
+
+                // Save to localStorage immediately
+                Storage.save({ ...data, settings: mergedSettings });
+
+                alert('✅ Settings fetched from Google Sheet successfully!\n\n' +
+                    'School Name: ' + (result.settings.schoolName || 'Updated') + '\n' +
+                    'Fee Structures: ' + (result.settings.feeStructures?.length || 0) + ' grades loaded');
+            } else {
+                alert('❌ Failed to fetch settings: ' + (result.error || 'No settings found'));
+            }
+        } catch (error) {
+            console.error('[Settings Fetch] Error:', error);
+            alert('❌ Error fetching settings: ' + error.message);
+        } finally {
+            setFetchingSettings(false);
+        }
+    };
+
     const handleImageUpload = async (e, field) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -165,12 +212,14 @@ export const Settings = ({ data, setData }) => {
     ];
 
     const getGradeGroup = (grade) => {
+        const baby = ['BABY CLASS'];
         const pp1pp2 = ['PP1', 'PP2'];
         const grade1to3 = ['GRADE 1', 'GRADE 2', 'GRADE 3'];
         const grade4to6 = ['GRADE 4', 'GRADE 5', 'GRADE 6'];
         const grade7to9 = ['GRADE 7', 'GRADE 8', 'GRADE 9'];
         const grade10to12 = ['GRADE 10', 'GRADE 11', 'GRADE 12'];
         
+        if (baby.includes(grade)) return 'baby';
         if (pp1pp2.includes(grade)) return 'pp1-pp2';
         if (grade1to3.includes(grade)) return 'grade1-3';
         if (grade4to6.includes(grade)) return 'grade4-6';
@@ -529,6 +578,7 @@ export const Settings = ({ data, setData }) => {
                     <!-- Grade Group Cards -->
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         ${[
+                            { id: 'baby', label: 'Baby Class', grades: ['BABY CLASS'], color: 'bg-yellow-50 border-yellow-200' },
                             { id: 'pp1-pp2', label: 'PP1 - PP2', grades: ['PP1', 'PP2'], color: 'bg-pink-50 border-pink-200' },
                             { id: 'grade1-3', label: 'Grade 1 - 3', grades: ['GRADE 1', 'GRADE 2', 'GRADE 3'], color: 'bg-blue-50 border-blue-200' },
                             { id: 'grade4-6', label: 'Grade 4 - 6', grades: ['GRADE 4', 'GRADE 5', 'GRADE 6'], color: 'bg-green-50 border-green-200' },
@@ -743,6 +793,7 @@ export const Settings = ({ data, setData }) => {
                     if (!feeStructure) return null;
                     
                     const gradeGroup = [
+                        { id: 'baby', grades: ['BABY CLASS'] },
                         { id: 'pp1-pp2', grades: ['PP1', 'PP2'] },
                         { id: 'grade1-3', grades: ['GRADE 1', 'GRADE 2', 'GRADE 3'] },
                         { id: 'grade4-6', grades: ['GRADE 4', 'GRADE 5', 'GRADE 6'] },
@@ -1395,8 +1446,19 @@ export const Settings = ({ data, setData }) => {
                         >
                             🔗 Test Google Connection
                         </button>
+                        <button 
+                            onClick=${handleFetchSettingsFromGoogle}
+                            disabled=${fetchingSettings || !settings.googleScriptUrl}
+                            class=${`w-full py-3 rounded-xl font-bold transition-all shadow-lg ${fetchingSettings ? 'bg-green-500 text-white' : settings.googleScriptUrl ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-400 text-white cursor-not-allowed'}`}
+                        >
+                            ${fetchingSettings ? '⏳ Fetching Settings...' : '📥 Fetch Settings from Google'}
+                        </button>
                         <div class="bg-green-50 p-4 rounded-xl border border-green-200">
-                            <p class="text-xs font-bold text-green-800 mb-2">👨‍🏫 How Teachers Use This:</p>
+                            <p class="text-xs font-bold text-green-800 mb-2">� Fetch Settings:</p>
+                            <p class="text-[10px] text-green-700">After connecting your Google Sheet URL, click <b>Fetch Settings from Google</b> to immediately download your school name, fee structures, and settings to this system.</p>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-xl border border-green-200">
+                            <p class="text-xs font-bold text-green-800 mb-2">�👨‍🏫 How Teachers Use This:</p>
                             <p class="text-[10px] text-green-700">1. Teachers open the Google Sheet on their phone</p>
                             <p class="text-[10px] text-green-700">2. They add/edit scores in the Assessments tab</p>
                             <p class="text-[10px] text-green-700">3. Admin clicks "Sync" button here to get all data</p>

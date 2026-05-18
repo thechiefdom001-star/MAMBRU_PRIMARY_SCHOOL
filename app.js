@@ -131,19 +131,34 @@ const App = () => {
                 googleSheetSync.setSettings(data.settings);
                 
                 try {
+                    // Fetch settings first
+                    const settingsResult = await googleSheetSync.fetchSettings();
+                    let mergedSettings = data.settings;
+                    
+                    if (settingsResult.success && settingsResult.settings) {
+                        console.log('Settings loaded from Google:', settingsResult.settings.schoolName);
+                        mergedSettings = {
+                            ...data.settings,
+                            ...settingsResult.settings,
+                            googleScriptUrl: data.settings?.googleScriptUrl // Keep the URL
+                        };
+                    }
+                    
+                    // Then fetch all other data
                     const result = await googleSheetSync.fetchAll();
                     
                     if (result.success) {
                         console.log('Google data loaded:', result.students?.length, 'students');
                         
-                        // Replace local data with Google data
+                        // Replace local data with Google data, including merged settings
                         const merged = Storage.replaceWithGoogleData(data, {
                             students: result.students || [],
                             assessments: result.assessments || [],
                             attendance: result.attendance || [],
                             payments: result.payments || [],
                             teachers: result.teachers || [],
-                            staff: result.staff || []
+                            staff: result.staff || [],
+                            settings: mergedSettings
                         });
                         
                         setData(merged);
